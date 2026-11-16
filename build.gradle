@@ -1,0 +1,128 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'uz.b2c.kapitalbank.commons'
+version = '1.0.0-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+    withSourcesJar()
+}
+
+repositories {
+    mavenCentral()
+    maven {
+        url "https://nexus.kapitalbank.uz/repository/maven-public/"
+        credentials {
+            username System.getenv("NEXUS_USER")
+            password System.getenv("NEXUS_PASSWORD")
+        }
+    }
+    // последним: локальные сборки не должны подменять опубликованные артефакты
+    mavenLocal()
+}
+
+dependencyManagement {
+    imports {
+        // Сборка против самой старой версии у сервисов — 3.1.x: так библиотека не использует API, которых нет
+        // у сервисов на 3.1. В сервисе версии задаёт его собственный BOM Spring Boot (сейчас у сервисов 3.1–3.4).
+        mavenBom 'org.springframework.boot:spring-boot-dependencies:3.1.12'
+    }
+}
+
+dependencies {
+    // Логирование: библиотека приносит log4j2 и JSON-шаблоны. Сервис по-прежнему исключает
+    // spring-boot-starter-logging (logback) у себя в build.gradle, как сейчас.
+    api 'org.springframework.boot:spring-boot-starter-log4j2'
+    api 'org.apache.logging.log4j:log4j-layout-template-json'
+
+    // Версии 1.x: доставка в прежний Kafka-топик (режим STDOUT_AND_KAFKA по умолчанию). Раньше kafka-clients
+    // приходил со старой библиотекой; чтобы замена библиотеки не требовала правок в сервисе, его приносит эта.
+    // В 2.0, когда логи собирает Vector, зависимость убирается.
+    runtimeOnly 'org.apache.kafka:kafka-clients'
+
+    // То, что раньше приносила observability-autoconfiguration: actuator, Prometheus, трассировка Brave, Swagger.
+    // Logback из стартеров исключён, чтобы библиотека не возвращала его сервисам.
+    api('org.springframework.boot:spring-boot-starter-actuator') {
+        exclude group: 'org.springframework.boot', module: 'spring-boot-starter-logging'
+    }
+    api 'io.micrometer:micrometer-registry-prometheus'
+    api 'io.micrometer:micrometer-tracing-bridge-brave'
+    // версия как у прежней библиотеки: с ней сервисы на Boot 3.1–3.4 работают сейчас; не управляется BOM Boot
+    api('org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0') {
+        exclude group: 'org.springframework.boot', module: 'spring-boot-starter-logging'
+    }
+
+    // Всё остальное у сервиса уже есть, поэтому compileOnly: библиотека не навязывает версии.
+    compileOnly 'org.springframework.boot:spring-boot-autoconfigure'
+    compileOnly 'org.springframework:spring-webmvc'
+    compileOnly 'jakarta.servlet:jakarta.servlet-api'
+    compileOnly 'com.fasterxml.jackson.core:jackson-core'
+    compileOnly 'org.slf4j:slf4j-api'
+    // резолверы маскирования для JSON-шаблона log4j2 — плагины log4j-core
+    compileOnly 'org.apache.logging.log4j:log4j-core'
+    // корреляция через Kafka (заголовки сообщений ↔ MDC): подключается, только если у сервиса есть spring-kafka
+    compileOnly 'org.springframework.kafka:spring-kafka'
+    compileOnly 'org.apache.kafka:kafka-clients'
+
+    annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
+    // генерирует META-INF/.../Log4j2Plugins.dat, по которому log4j находит резолверы maskedMessage/maskedException
+    annotationProcessor 'org.apache.logging.log4j:log4j-core'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-web'
+    testImplementation 'org.springframework.kafka:spring-kafka'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    // сквозной тест перенастраивает log4j2 глобально, поэтому идёт отдельной задачей в своей JVM
+    exclude '**/e2e/**'
+}
+
+def e2eTest = tasks.register('e2eTest', Test) {
+    description = 'Сквозной запуск Spring Boot с библиотекой (отдельная JVM)'
+    group = 'verification'
+    useJUnitPlatform()
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    include '**/e2e/**'
+}
+tasks.named('check') {
+    dependsOn e2eTest
+}
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            from components.java
+            // версии зависимостей задаёт BOM через dependency-management; без этого в Gradle Module Metadata
+            // и в pom зависимости публикуются без версий, и сервисы не смогут их разрешить
+            versionMapping {
+                usage('java-api') {
+                    fromResolutionOf('runtimeClasspath')
+                }
+                usage('java-runtime') {
+                    fromResolutionResult()
+                }
+            }
+        }
+    }
+    repositories {
+        maven {
+            // проверить имена репозиториев в Nexus банка
+            url version.endsWith('SNAPSHOT')
+                ? "https://nexus.kapitalbank.uz/repository/maven-snapshots/"
+                : "https://nexus.kapitalbank.uz/repository/maven-releases/"
+            credentials {
+                username System.getenv("NEXUS_USER")
+                password System.getenv("NEXUS_PASSWORD")
+            }
+        }
+    }
+}

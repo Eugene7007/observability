@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  lib-observability, режим STDOUT (целевой). Одна JSON-запись на строку в stdout, доставку в хранилище
+  делает агент в кластере (Vector). Приложение ничего не знает о Kafka и Loki, поэтому их отказ
+  не влияет на обработку запросов.
+
+  Формат записи описан в layout-json.json. Каждая строка ограничена maxStringLength, тела запросов
+  заранее обрезаны библиотекой до lib.observability.http-log.max-body-bytes.
+  Уровни логгеров по-прежнему задаются через logging.level.* в application.yml.
+-->
+<Configuration status="warn" name="lib-observability-json">
+    <Properties>
+        <Property name="service.name">${spring:spring.application.name:-unknown}</Property>
+    </Properties>
+
+    <Appenders>
+        <Console name="stdout" target="SYSTEM_OUT">
+            <JsonTemplateLayout eventTemplateUri="classpath:lib-observability/layout-json.json" maxStringLength="8192">
+                <EventTemplateAdditionalField key="service.name" value="${service.name}"/>
+                <EventTemplateAdditionalField key="service.version" value="${env:SERVICE_VERSION:-unknown}"/>
+                <EventTemplateAdditionalField key="deployment.environment" value="${env:DEPLOYMENT_ENVIRONMENT:-unknown}"/>
+            </JsonTemplateLayout>
+        </Console>
+    </Appenders>
+
+    <Loggers>
+        <Root level="INFO">
+            <AppenderRef ref="stdout"/>
+        </Root>
+    </Loggers>
+</Configuration>

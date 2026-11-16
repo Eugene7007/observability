@@ -1,0 +1,3 @@
+uz.b2c.kapitalbank.commons.observability.autoconfigure.ObservabilityAutoConfiguration
+uz.b2c.kapitalbank.commons.observability.autoconfigure.ObservabilityStatusAutoConfiguration
+uz.b2c.kapitalbank.commons.observability.platform.SwaggerAutoConfiguration

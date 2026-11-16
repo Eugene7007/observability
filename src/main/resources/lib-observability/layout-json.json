@@ -1,0 +1,67 @@
+{
+  "@timestamp": {
+    "$resolver": "timestamp",
+    "pattern": {
+      "format": "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+      "timeZone": "UTC"
+    }
+  },
+  "level": {
+    "$resolver": "level",
+    "field": "name"
+  },
+  "logger": {
+    "$resolver": "logger",
+    "field": "name"
+  },
+  "thread": {
+    "$resolver": "thread",
+    "field": "name"
+  },
+  "message": {
+    "$resolver": "maskedMessage"
+  },
+  "trace_id": {
+    "$resolver": "mdc",
+    "key": "traceId"
+  },
+  "span_id": {
+    "$resolver": "mdc",
+    "key": "spanId"
+  },
+  "correlation_id": {
+    "$resolver": "mdc",
+    "key": "correlationId"
+  },
+  "client_device_id": {
+    "$resolver": "mdc",
+    "key": "clientDeviceId"
+  },
+  "user_guid": {
+    "$resolver": "mdc",
+    "key": "userGuid"
+  },
+  "device_id": {
+    "$resolver": "mdc",
+    "key": "deviceId"
+  },
+  "httpFields": {
+    "$resolver": "maskedMap"
+  },
+  "error.type": {
+    "$resolver": "maskedException",
+    "field": "className"
+  },
+  "error.message": {
+    "$resolver": "maskedException",
+    "field": "message"
+  },
+  "error.stack_trace": {
+    "$resolver": "maskedException",
+    "field": "stackTrace",
+    "truncationPoints": [
+      "jakarta.servlet.http.HttpServlet.service"
+    ],
+    "truncationSuffix": "... [truncated]"
+  }
+}

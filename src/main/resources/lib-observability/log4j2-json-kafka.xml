@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  lib-observability, режим STDOUT_AND_KAFKA (переходный и откат доставки).
+  stdout — как в режиме STDOUT. Дополнительно записи уходят в прежний Kafka-топик в прежнем формате
+  (layout-legacy-kafka.json), чтобы текущие потребители топика продолжали работать.
+
+  Отличия от Kafka-аппендера старой библиотеки, ради которых он не блокирует запросы:
+  1. Отправка в отдельном потоке за очередью на 1024 события. Если Kafka не успевает и очередь полна,
+     событие в Kafka не уходит (в stdout оно уже записано), а поток запроса не ждёт.
+  2. Продюсер не блокирует даже фоновый поток дольше 2 с и не держит больше 16 МБ буфера.
+
+  Режим включается, только если задан адрес Kafka (LOGGING_KAFKA_SERVERS или logging.appender.kafka.bootstrap.servers),
+  иначе LoggingConfigSelector выбирает stdout. Настройки — те же свойства и переменные LOGGING_KAFKA_*, что у прежней
+  библиотеки, с прежними значениями по умолчанию (в том числе sasl.mechanism и ScramLoginModule), поэтому
+  манифест менять не нужно. kafka-clients библиотека 1.x приносит сама.
+  Kafka-аппендер в log4j2 помечен устаревшим, поэтому этот режим только на период перехода.
+-->
+<Configuration status="warn" name="lib-observability-json-kafka">
+    <Properties>
+        <Property name="service.name">${spring:spring.application.name:-unknown}</Property>
+        <!-- те же свойства, что читала прежняя библиотека; значения по умолчанию и переменные LOGGING_KAFKA_*
+             подставляет LoggingConfigSelector -->
+        <Property name="kafka.bootstrap.servers">${spring:logging.appender.kafka.bootstrap.servers}</Property>
+        <Property name="kafka.topic">${spring:logging.appender.kafka.topic}</Property>
+        <Property name="kafka.username">${spring:logging.appender.kafka.username}</Property>
+        <Property name="kafka.password">${spring:logging.appender.kafka.password}</Property>
+        <Property name="kafka.security.protocol">${spring:logging.appender.kafka.security.protocol}</Property>
+        <Property name="kafka.sasl.mechanism">${spring:logging.appender.kafka.sasl.mechanism}</Property>
+    </Properties>
+
+    <Appenders>
+        <Console name="stdout" target="SYSTEM_OUT">
+            <JsonTemplateLayout eventTemplateUri="classpath:lib-observability/layout-json.json" maxStringLength="8192">
+                <EventTemplateAdditionalField key="service.name" value="${service.name}"/>
+                <EventTemplateAdditionalField key="service.version" value="${env:SERVICE_VERSION:-unknown}"/>
+                <EventTemplateAdditionalField key="deployment.environment" value="${env:DEPLOYMENT_ENVIRONMENT:-unknown}"/>
+            </JsonTemplateLayout>
+        </Console>
+
+        <Kafka name="Kafka" topic="${kafka.topic}" syncSend="false">
+            <Property name="bootstrap.servers">${kafka.bootstrap.servers}</Property>
+            <Property name="security.protocol">${kafka.security.protocol}</Property>
+            <Property name="sasl.mechanism">${kafka.sasl.mechanism}</Property>
+            <Property name="sasl.jaas.config">org.apache.kafka.common.security.scram.ScramLoginModule required username="${kafka.username}" password="${kafka.password}";</Property>
+            <Property name="acks">1</Property>
+            <Property name="enable.idempotence">false</Property>
+            <Property name="max.block.ms">2000</Property>
+            <Property name="buffer.memory">16777216</Property>
+            <Property name="linger.ms">20</Property>
+            <Property name="compression.type">lz4</Property>
+            <JsonTemplateLayout eventTemplateUri="classpath:lib-observability/layout-legacy-kafka.json" maxStringLength="5000">
+                <EventTemplateAdditionalField key="application" value="${service.name}"/>
+            </JsonTemplateLayout>
+        </Kafka>
+
+        <Async name="AsyncKafka" bufferSize="1024" blocking="false" shutdownTimeout="3000" includeLocation="false">
+            <AppenderRef ref="Kafka"/>
+        </Async>
+    </Appenders>
+
+    <Loggers>
+        <!-- клиент Kafka не должен писать в Kafka, иначе при сбоях получится петля -->
+        <Logger name="org.apache.kafka" level="error" additivity="false">
+            <AppenderRef ref="stdout"/>
+        </Logger>
+        <Root level="INFO">
+            <AppenderRef ref="stdout"/>
+            <AppenderRef ref="AsyncKafka"/>
+        </Root>
+    </Loggers>
+</Configuration>
