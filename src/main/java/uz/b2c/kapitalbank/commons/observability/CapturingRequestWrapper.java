@@ -8,8 +8,6 @@ import jakarta.servlet.http.HttpServletRequestWrapper;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
 
 /**
  * Отдаёт приложению тело запроса как есть и попутно запоминает первые байты для лога.
@@ -21,9 +19,10 @@ final class CapturingRequestWrapper extends HttpServletRequestWrapper {
     private ServletInputStream stream;
     private BufferedReader reader;
 
-    CapturingRequestWrapper(final HttpServletRequest request, final int limit) {
+    CapturingRequestWrapper(final HttpServletRequest request, final int limit) throws IOException {
         super(request);
         this.capture = new BodyCapture(limit);
+        this.capture.write(request.getInputStream().readAllBytes(), 0, request.getContentLength());
     }
 
     BodyCapture capture() {
@@ -40,12 +39,14 @@ final class CapturingRequestWrapper extends HttpServletRequestWrapper {
 
     @Override
     public BufferedReader getReader() throws IOException {
-        if (reader == null) {
-            String encoding = getCharacterEncoding();
-            Charset charset = encoding == null ? StandardCharsets.UTF_8 : Charset.forName(encoding);
-            reader = new BufferedReader(new InputStreamReader(getInputStream(), charset));
-        }
-        return reader;
+//        if (reader == null) {
+//            String encoding = getCharacterEncoding();
+//            Charset charset = encoding == null ? StandardCharsets.UTF_8 : Charset.forName(encoding);
+//            reader = new BufferedReader(new InputStreamReader(getInputStream(), charset));
+//        }
+//        return reader;
+
+        return new BufferedReader(new InputStreamReader(this.getInputStream()));
     }
 
     private static final class TeeInputStream extends ServletInputStream {

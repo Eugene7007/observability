@@ -26,6 +26,7 @@ public final class HttpLogSettings {
     private final List<String> bodyPaths;
     private final Set<String> allowedHeaders;
     private final JsonBodyMasker masker;
+    private final XmlBodyMasker xmlmasker;
     private final HttpLogProperties.Bodies bodies;
 
     public HttpLogSettings(final HttpLogProperties properties) {
@@ -36,6 +37,7 @@ public final class HttpLogSettings {
             .map(header -> header.toLowerCase(Locale.ROOT))
             .collect(Collectors.toUnmodifiableSet());
         this.masker = new JsonBodyMasker(properties.getMasking());
+        this.xmlmasker = new XmlBodyMasker(properties.getMasking());
         this.bodies = properties.getBodies();
     }
 
@@ -83,9 +85,13 @@ public final class HttpLogSettings {
     String renderBody(final BodyCapture capture, final String contentType) {
         String rendered = null;
         if (capture != null && capture.total() > 0) {
-            rendered = isJsonOrUnknown(contentType)
-                ? masker.mask(capture.buffer(), capture.size(), capture.truncated())
-                : "[" + contentType + ", " + capture.total() + " bytes]";
+            if (isXml(contentType)) {
+                rendered = xmlmasker.mask(capture.buffer(), capture.size(), capture.truncated());
+            } else {
+                rendered = isJsonOrUnknown(contentType)
+                    ? masker.mask(capture.buffer(), capture.size(), capture.truncated())
+                    : "[" + contentType + ", " + capture.total() + " bytes]";
+            }
         }
         return rendered;
     }
@@ -130,5 +136,9 @@ public final class HttpLogSettings {
 
     private static boolean isJsonOrUnknown(final String contentType) {
         return contentType == null || contentType.toLowerCase(Locale.ROOT).contains("json");
+    }
+
+    private static boolean isXml(final String contentType) {
+        return contentType != null && contentType.toLowerCase(Locale.ROOT).contains("xml");
     }
 }
