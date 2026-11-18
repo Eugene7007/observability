@@ -20,6 +20,7 @@ final class CapturingResponseWrapper extends HttpServletResponseWrapper {
     private final BodyCapture capture;
     private ServletOutputStream stream;
     private PrintWriter writer;
+    private boolean errorSent;
 
     CapturingResponseWrapper(final HttpServletResponse response, final int limit) {
         super(response);
@@ -28,6 +29,23 @@ final class CapturingResponseWrapper extends HttpServletResponseWrapper {
 
     BodyCapture capture() {
         return capture;
+    }
+
+    /** Ответ отдан через sendError: тело напишет страница ошибки (в Spring Boot — /error) уже после цепочки. */
+    boolean errorSent() {
+        return errorSent;
+    }
+
+    @Override
+    public void sendError(final int status) throws IOException {
+        errorSent = true;
+        super.sendError(status);
+    }
+
+    @Override
+    public void sendError(final int status, final String message) throws IOException {
+        errorSent = true;
+        super.sendError(status, message);
     }
 
     @Override

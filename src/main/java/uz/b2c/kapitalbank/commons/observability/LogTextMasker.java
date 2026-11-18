@@ -123,6 +123,10 @@ public final class LogTextMasker {
             return out.toString();
         }
 
+        /** Массивы групп цифр: один раз на разбор строки, а не на каждое число. */
+        private int[] groupStart;
+        private int[] groupEnd;
+
         private void replace(final int from, final int to, final String value) {
             if (out == null) {
                 out = new StringBuilder(n + 16);
@@ -307,11 +311,13 @@ public final class LogTextMasker {
          */
         private int digits(final int start) {
             if (start > 0 && isWordChar(s.charAt(start - 1))) {
-                return skipWord(start);
+                return panInWord(start);
             }
             boolean plus = s.charAt(start) == '+';
-            int[] groupStart = new int[MAX_GROUPS];
-            int[] groupEnd = new int[MAX_GROUPS];
+            if (groupStart == null) {
+                groupStart = new int[MAX_GROUPS];
+                groupEnd = new int[MAX_GROUPS];
+            }
             int groups = 0;
             int i = plus ? start + 1 : start;
             while (i < n && groups < MAX_GROUPS) {
@@ -323,9 +329,10 @@ public final class LogTextMasker {
                     break;
                 }
                 if (i < n && isWordChar(s.charAt(i))) {
-                    // число вплотную к букве — часть идентификатора (abc123, 123abc), не номер
+                    // число вплотную к букве — часть идентификатора (abc123, 123abc), не номер;
+                    // но номер карты целиком (13–19 цифр с верной суммой) маскируется и так: 8600…1233_x
                     if (groups == 0) {
-                        return skipWord(i);
+                        return panInWord(g);
                     }
                     break;
                 }
@@ -373,6 +380,23 @@ public final class LogTextMasker {
                 }
             }
             return first;
+        }
+
+        /**
+         * Цифры вплотную к букве или «_» (N8600…, 8600…_x, 8600…phone): обычно это идентификатор и не трогается,
+         * но непрерывная последовательность из 13–19 цифр с верной контрольной суммой маскируется как карта.
+         */
+        private int panInWord(final int from) {
+            int end = from;
+            while (end < n && isDigit(s.charAt(end))) {
+                end++;
+            }
+            int length = end - from;
+            if (length >= PAN_MIN && length <= PAN_MAX && luhn(s, from, end)) {
+                replace(from, end, maskDigits(s.substring(from, end), PAN_HEAD, TAIL));
+                return end;
+            }
+            return skipWord(from);
         }
 
         private int skipWord(final int from) {

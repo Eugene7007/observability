@@ -96,7 +96,24 @@ public class ObservabilityAutoConfiguration {
             registration.setName("libObservabilityHttpServerLoggingFilter");
             registration.setOrder(LOGGING_FILTER_ORDER);
             registration.addUrlPatterns("/*");
+            // ERROR — чтобы в запись об ошибке попало тело страницы ошибки (sendError, исключение)
+            registration.setDispatcherTypes(jakarta.servlet.DispatcherType.REQUEST, jakarta.servlet.DispatcherType.ASYNC,
+                jakarta.servlet.DispatcherType.ERROR);
             return registration;
+        }
+
+        /** Пишет отложенную запись об ошибке, если прохода ERROR не было. */
+        @Bean
+        @ConditionalOnMissingBean(name = "libObservabilityHttpLogCompletion")
+        org.springframework.boot.web.servlet.ServletListenerRegistrationBean<jakarta.servlet.ServletRequestListener>
+            libObservabilityHttpLogCompletion() {
+            return new org.springframework.boot.web.servlet.ServletListenerRegistrationBean<>(
+                new jakarta.servlet.ServletRequestListener() {
+                    @Override
+                    public void requestDestroyed(final jakarta.servlet.ServletRequestEvent event) {
+                        HttpServerLoggingFilter.completeRequest(event.getServletRequest());
+                    }
+                });
         }
 
         @Bean

@@ -23,7 +23,6 @@ import java.util.concurrent.TimeUnit;
 public class HttpClientLoggingInterceptor implements ClientHttpRequestInterceptor, Ordered {
 
     static final String LOGGER_NAME = "observability.http.out";
-    private static final int SERVER_ERROR = 500;
 
     private final HttpLogSettings settings;
     private final HttpLogSink sink;
@@ -52,27 +51,27 @@ public class HttpClientLoggingInterceptor implements ClientHttpRequestIntercepto
         if (!sink.isEnabled(Level.WARN) || settings.isExcluded(path)) {
             result = execution.execute(request, body);
         } else {
-            result = executeLogged(request, body, execution,
-                sink.isEnabled(settings.bodyCaptureLevel()) && settings.logBodies(path));
+            result = executeLogged(request, body, execution, path);
         }
         return result;
     }
 
     private ClientHttpResponse executeLogged(final HttpRequest request, final byte[] body,
                                              final ClientHttpRequestExecution execution,
-                                             final boolean bodiesAllowed) throws IOException {
+                                             final String path) throws IOException {
         long start = System.nanoTime();
         ClientHttpResponse response;
         try {
             response = execution.execute(request, body);
         } catch (IOException | RuntimeException e) {
-            log(request, body, bodiesAllowed, null, null, e, start);
+            // ошибка вызова: тело запроса пишется всегда
+            log(request, body, true, null, null, e, start);
             throw e;
         }
         int status = response.getStatusCode().value();
         ClientHttpResponse result = response;
-        // статус уже известен: при ON_ERROR и успешном ответе тело ответа даже не копируется
-        boolean bodies = bodiesAllowed && settings.includeBodies(status, false);
+        // статус уже известен: у успешного ответа без bodies=ALWAYS тело ответа даже не копируется
+        boolean bodies = settings.includeBodies(status, false, path);
         if (bodies) {
             BodyCapture capture = new BodyCapture(settings.maxBodyBytes());
             String contentType = response.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE);
@@ -90,8 +89,7 @@ public class HttpClientLoggingInterceptor implements ClientHttpRequestIntercepto
     private void log(final HttpRequest request, final byte[] body, final boolean bodies, final Integer status,
                      final CapturedResponse response, final Exception failure, final long start) {
         try {
-            boolean problem = failure != null || (status != null && status >= SERVER_ERROR);
-            Level level = problem ? Level.WARN : Level.INFO;
+            Level level = HttpServerLoggingFilter.levelOf(failure != null, status == null ? 0 : status);
             if (sink.isEnabled(level)) {
                 sink.log(level, buildMessage(request, body, bodies, status, response, failure,
                     TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)));

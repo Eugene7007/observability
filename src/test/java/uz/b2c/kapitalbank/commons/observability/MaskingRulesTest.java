@@ -46,4 +46,36 @@ class MaskingRulesTest {
             MaskingRules.install(previous);
         }
     }
+
+    @Test
+    void thirdReviewDictionaryGaps() {
+        java.util.Map<String, MaskingRules.Rule> expected = new java.util.LinkedHashMap<>();
+        for (String name : new String[] {"processingKey", "recipientProcessingKey", "sender_processing_key"}) {
+            expected.put(name, MaskingRules.Rule.PAN);
+        }
+        for (String name : new String[] {"track1", "track2", "trackData", "pinBlock", "PIN_BLOCK", "pvv", "cavv", "icvv",
+            "expirationDate", "expireDate", "cardExpire", "expMonth", "expYear", "inn", "tin", "stir", "clientStir",
+            "pnfl", "nationalId", "personalNumber", "docSeries", "documentSerial", "codeWord"}) {
+            expected.put(name, MaskingRules.Rule.HIDE);
+        }
+        for (String name : new String[] {"firstname", "LASTNAME", "middlename", "beneficiaryName", "payerName",
+            "payeeName", "embossedName", "nameOnCard"}) {
+            expected.put(name, MaskingRules.Rule.NAME);
+        }
+        for (String name : new String[] {"mobile", "mobileNumber", "tel", "telephone"}) {
+            expected.put(name, MaskingRules.Rule.TAIL);
+        }
+        MaskingRules rules = MaskingRules.base();
+        expected.forEach((name, rule) -> assertThat(rules.ruleFor(name)).as(name).isEqualTo(rule));
+    }
+
+    @Test
+    void businessFieldsStayVisible() {
+        MaskingRules rules = MaskingRules.base();
+        for (String name : new String[] {"amount", "currency", "status", "trackingId", "expiresIn",
+            "mobileApp", "code", "errorCode", "createdAt"}) {
+            MaskingRules.Rule rule = rules.ruleFor(name);
+            assertThat(rule == null || rule == MaskingRules.Rule.CODE).as(name).isTrue();
+        }
+    }
 }

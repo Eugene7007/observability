@@ -2,30 +2,43 @@ package uz.b2c.kapitalbank.commons.observability;
 
 import jakarta.servlet.AsyncEvent;
 import jakarta.servlet.AsyncListener;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletRequest;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.ThreadContext;
 import org.apache.logging.log4j.status.StatusLogger;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.servlet.HandlerMapping;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Одна запись в лог на входящий запрос: метод, путь, статус, время, размеры,
- * разрешённые заголовки и (для путей из body-paths) замаскированные начала тел.
+ * Одна запись в лог на входящий запрос: метод, путь, статус, время, размеры и разрешённые заголовки.
  * <p>
- * Тела не буферизуются целиком: запрос читается приложением напрямую, ответ сразу уходит клиенту,
- * а для лога копируются только первые max-body-bytes байт.
+ * Тела запроса и ответа (замаскированные, не больше max-body-bytes) попадают в запись всегда при 4xx, 5xx и
+ * исключении, а у успешных обменов — только при {@code bodies=ALWAYS}. Уровень записи: успех — INFO, 4xx — WARN,
+ * 5xx и исключение — ERROR.
+ * <p>
+ * Тела не буферизуются целиком: начало тела запроса читается заранее и отдаётся приложению вместе с остальным
+ * телом ({@link CapturingRequestWrapper}), ответ сразу уходит клиенту, а для лога копируются только первые байты.
+ * <p>
+ * Если ответ — ошибка без тела (sendError: 404, 405, 415 из Spring; исключение), тело пишет страница ошибки
+ * Spring Boot уже после цепочки. Тогда запись откладывается до прохода ERROR и включает тело страницы ошибки;
+ * если прохода ERROR не будет, запись пишется по завершении запроса ({@link #completeRequest}).
  */
 public class HttpServerLoggingFilter extends OncePerRequestFilter {
 
     static final String LOGGER_NAME = "observability.http.in";
+    private static final String PENDING = HttpServerLoggingFilter.class.getName() + ".PENDING";
+    private static final int CLIENT_ERROR = 400;
     private static final int SERVER_ERROR = 500;
 
     private final HttpLogSettings settings;
@@ -42,7 +55,7 @@ public class HttpServerLoggingFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(final HttpServletRequest request) {
-        // при уровне WARN фильтр продолжает работать, чтобы записать ошибки и 5xx
+        // при уровне WARN фильтр продолжает работать, чтобы записать 4xx, 5xx и исключения
         return !sink.isEnabled(Level.WARN) || settings.isExcluded(pathWithinApplication(request));
     }
 
@@ -50,18 +63,20 @@ public class HttpServerLoggingFilter extends OncePerRequestFilter {
     protected void doFilterInternal(final HttpServletRequest request,
                                     final HttpServletResponse response,
                                     final FilterChain chain) throws ServletException, IOException {
+        if (request.getDispatcherType() == DispatcherType.ERROR) {
+            // страница ошибки — не отдельный обмен: она только дописывает тело в отложенную запись
+            errorPage(request, response, chain);
+            return;
+        }
         long start = System.nanoTime();
-        // при ON_ERROR статус ещё неизвестен, поэтому начало тела копится заранее (не больше max-body-bytes),
-        // а в запись попадает, только если обмен закончился ошибкой
-        boolean bodies = sink.isEnabled(settings.bodyCaptureLevel()) && settings.logBodies(pathWithinApplication(request));
-        CapturingRequestWrapper capturedRequest = bodies
-            ? new CapturingRequestWrapper(request, settings.maxBodyBytes()) : null;
-        CapturingResponseWrapper capturedResponse = bodies
-            ? new CapturingResponseWrapper(response, settings.maxBodyBytes()) : null;
+        // статус ещё неизвестен, а тело ошибки нужно всегда, поэтому начало тел копится у каждого обмена
+        // (не больше max-body-bytes) и попадает в запись при ошибке или при bodies=ALWAYS
+        CapturingRequestWrapper capturedRequest = new CapturingRequestWrapper(request, settings.maxBodyBytes());
+        CapturingResponseWrapper capturedResponse = new CapturingResponseWrapper(response, settings.maxBodyBytes());
+        capturedRequest.prefetch();
         Exception failure = null;
         try {
-            chain.doFilter(capturedRequest != null ? capturedRequest : request,
-                capturedResponse != null ? capturedResponse : response);
+            chain.doFilter(capturedRequest, capturedResponse);
         } catch (IOException | ServletException | RuntimeException e) {
             failure = e;
             throw e;
@@ -71,7 +86,13 @@ public class HttpServerLoggingFilter extends OncePerRequestFilter {
                 request.getAsyncContext().addListener(
                     new CompletionListener(request, response, capturedRequest, capturedResponse, start));
             } else {
-                finish(request, response, capturedRequest, capturedResponse, failure, start);
+                capturedResponse.flushWriter();
+                if (awaitsErrorPage(request, response, capturedResponse, failure)) {
+                    request.setAttribute(PENDING,
+                        new Pending(request, response, capturedRequest, capturedResponse, failure, start));
+                } else {
+                    log(request, response, capturedRequest, capturedResponse, failure, start);
+                }
             }
         }
     }
@@ -79,10 +100,106 @@ public class HttpServerLoggingFilter extends OncePerRequestFilter {
     private void finish(final HttpServletRequest request, final HttpServletResponse response,
                         final CapturingRequestWrapper capturedRequest, final CapturingResponseWrapper capturedResponse,
                         final Exception failure, final long start) {
-        if (capturedResponse != null) {
-            capturedResponse.flushWriter();
-        }
+        capturedResponse.flushWriter();
         log(request, response, capturedRequest, capturedResponse, failure, start);
+    }
+
+    /**
+     * Ошибка без тела, которое ещё напишет страница ошибки контейнера: sendError (после него Tomcat считает ответ
+     * зафиксированным, но тело ещё не записано) или исключение до записи ответа.
+     */
+    private static boolean awaitsErrorPage(final HttpServletRequest request, final HttpServletResponse response,
+                                           final CapturingResponseWrapper capturedResponse, final Exception failure) {
+        return (capturedResponse.errorSent() || (failure != null && !response.isCommitted()))
+            && capturedResponse.capture().total() == 0 && request.getDispatcherType() == DispatcherType.REQUEST;
+    }
+
+    @Override
+    protected boolean shouldNotFilterErrorDispatch() {
+        return false;
+    }
+
+    /**
+     * Проход ERROR (страница ошибки Spring Boot): если запись отложена, тело страницы ошибки копируется и запись
+     * пишется с ним. Сам проход ERROR отдельной записи не даёт.
+     */
+    @Override
+    protected void doFilterNestedErrorDispatch(final HttpServletRequest request, final HttpServletResponse response,
+                                               final FilterChain chain) throws ServletException, IOException {
+        errorPage(request, response, chain);
+    }
+
+    private void errorPage(final HttpServletRequest request, final HttpServletResponse response,
+                           final FilterChain chain) throws ServletException, IOException {
+        Object pending = request.getAttribute(PENDING);
+        if (!(pending instanceof Pending record)) {
+            chain.doFilter(request, response);
+            return;
+        }
+        CapturingResponseWrapper errorPage = new CapturingResponseWrapper(response, settings.maxBodyBytes());
+        try {
+            chain.doFilter(request, errorPage);
+        } finally {
+            errorPage.flushWriter();
+            record.complete(errorPage);
+        }
+    }
+
+    /**
+     * Пишет отложенную запись, если прохода ERROR не было (страница ошибки не настроена или контейнер отдал свою).
+     * Вызывается слушателем завершения запроса, который регистрирует библиотека.
+     */
+    public static void completeRequest(final ServletRequest request) {
+        Object pending = request.getAttribute(PENDING);
+        if (pending instanceof Pending record) {
+            record.complete(null);
+        }
+    }
+
+    /** Отложенная запись об ошибке: всё, что нужно для неё, и MDC запроса (к проходу ERROR он уже очищен). */
+    private final class Pending {
+
+        private final HttpServletRequest request;
+        private final HttpServletResponse response;
+        private final CapturingRequestWrapper capturedRequest;
+        private final CapturingResponseWrapper capturedResponse;
+        private final Exception failure;
+        private final long start;
+        private final Map<String, String> context = ThreadContext.getImmutableContext();
+        private final AtomicBoolean done = new AtomicBoolean();
+
+        Pending(final HttpServletRequest request, final HttpServletResponse response,
+                final CapturingRequestWrapper capturedRequest, final CapturingResponseWrapper capturedResponse,
+                final Exception failure, final long start) {
+            this.request = request;
+            this.response = response;
+            this.capturedRequest = capturedRequest;
+            this.capturedResponse = capturedResponse;
+            this.failure = failure;
+            this.start = start;
+        }
+
+        void complete(final CapturingResponseWrapper errorPage) {
+            if (!done.compareAndSet(false, true)) {
+                return;
+            }
+            request.removeAttribute(PENDING);
+            withContext(context, () -> log(request, response, capturedRequest,
+                errorPage != null ? errorPage : capturedResponse, failure, start));
+        }
+    }
+
+    /** Пишет запись с MDC исходного запроса: на другом потоке или после очистки MDC его уже нет. */
+    private static void withContext(final Map<String, String> context, final Runnable action) {
+        Map<String, String> current = ThreadContext.getImmutableContext();
+        try {
+            ThreadContext.clearMap();
+            ThreadContext.putAll(context);
+            action.run();
+        } finally {
+            ThreadContext.clearMap();
+            ThreadContext.putAll(current);
+        }
     }
 
     /** Путь без context-path: шаблоны exclude-paths и body-paths пишутся относительно приложения. */
@@ -101,6 +218,7 @@ public class HttpServerLoggingFilter extends OncePerRequestFilter {
         private final CapturingRequestWrapper capturedRequest;
         private final CapturingResponseWrapper capturedResponse;
         private final long start;
+        private final Map<String, String> context = ThreadContext.getImmutableContext();
         private final AtomicBoolean done = new AtomicBoolean();
 
         CompletionListener(final HttpServletRequest request, final HttpServletResponse response,
@@ -136,7 +254,7 @@ public class HttpServerLoggingFilter extends OncePerRequestFilter {
 
         private void complete(final Exception failure) {
             if (done.compareAndSet(false, true)) {
-                finish(request, response, capturedRequest, capturedResponse, failure, start);
+                withContext(context, () -> finish(request, response, capturedRequest, capturedResponse, failure, start));
             }
         }
     }
@@ -145,7 +263,7 @@ public class HttpServerLoggingFilter extends OncePerRequestFilter {
                      final CapturingRequestWrapper capturedRequest, final CapturingResponseWrapper capturedResponse,
                      final Exception failure, final long start) {
         try {
-            Level level = levelOf(failure, response);
+            Level level = levelOf(failure != null, response.getStatus());
             if (sink.isEnabled(level)) {
                 sink.log(level, buildMessage(request, response, capturedRequest, capturedResponse,
                     failure, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)));
@@ -156,8 +274,14 @@ public class HttpServerLoggingFilter extends OncePerRequestFilter {
         }
     }
 
-    private static Level levelOf(final Exception failure, final HttpServletResponse response) {
-        return failure != null || response.getStatus() >= SERVER_ERROR ? Level.WARN : Level.INFO;
+    static Level levelOf(final boolean failed, final int status) {
+        Level level = Level.INFO;
+        if (failed || status >= SERVER_ERROR) {
+            level = Level.ERROR;
+        } else if (status >= CLIENT_ERROR) {
+            level = Level.WARN;
+        }
+        return level;
     }
 
     private HttpLogMessage buildMessage(final HttpServletRequest request, final HttpServletResponse response,
@@ -182,13 +306,24 @@ public class HttpServerLoggingFilter extends OncePerRequestFilter {
                 Collections.list(request.getHeaderNames()), request::getHeader))
             .field("error.type", failure == null ? null : failure.getClass().getName());
 
-        boolean includeBodies = settings.includeBodies(status, failure != null);
-        if (capturedRequest != null && includeBodies) {
-            message.field("http.request.body.bytes", capturedRequest.capture().total())
-                .field("http.request.body.content",
-                    settings.renderBody(capturedRequest.capture(), request.getContentType()));
+        boolean includeBodies = settings.includeBodies(status, failure != null, pathWithinApplication(request));
+        if (includeBodies) {
+            String content;
+            long bytes = capturedRequest.totalBytes();
+            if (capturedRequest.isFormPost()) {
+                Map<String, String[]> form = capturedRequest.formForLog();
+                content = form != null ? settings.renderForm(form)
+                    : "[" + request.getContentType() + ", " + bytes + " bytes]";
+            } else if (capturedRequest.isMultipart()) {
+                String parts = capturedRequest.partsForLog();
+                content = parts != null ? parts : "[" + request.getContentType() + ", " + bytes + " bytes, not parsed]";
+            } else {
+                content = settings.renderBody(capturedRequest.capture(), request.getContentType());
+            }
+            message.field("http.request.body.bytes", bytes > 0 ? bytes : null)
+                .field("http.request.body.content", content);
         }
-        if (capturedResponse != null && includeBodies) {
+        if (includeBodies) {
             message.field("http.response.body.bytes", capturedResponse.capture().total())
                 .field("http.response.body.content",
                     settings.renderBody(capturedResponse.capture(), response.getContentType()));

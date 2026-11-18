@@ -13,6 +13,7 @@ final class BodyCapture {
     private final int limit;
     private byte[] buffer;
     private int size;
+    private boolean shared;
     private long total;
 
     BodyCapture(final int limit) {
@@ -41,10 +42,31 @@ final class BodyCapture {
     }
 
     private void ensure(final int required) {
+        if (shared && required > size) {
+            // общий с приложением массив не дописывается: дальше — своя копия
+            buffer = Arrays.copyOf(buffer, Math.min(limit, Math.max(size * 2, required)));
+            shared = false;
+            return;
+        }
         if (buffer == null) {
             buffer = new byte[Math.min(limit, Math.max(INITIAL, required))];
         } else if (required > buffer.length) {
             buffer = Arrays.copyOf(buffer, Math.min(limit, Math.max(buffer.length * 2, required)));
+        }
+    }
+
+    /**
+     * Берёт уже прочитанные байты как свой буфер, без копии: {@code filled} байт в начале {@code data}.
+     * Массив не меняется (приложению из него же отдаётся начало тела).
+     */
+    void adopt(final byte[] data, final int filled) {
+        if (size == 0 && filled > 0) {
+            total += filled;
+            buffer = data;
+            size = Math.min(filled, limit);
+            shared = true;
+        } else {
+            write(data, 0, filled);
         }
     }
 
@@ -63,6 +85,10 @@ final class BodyCapture {
 
     long total() {
         return total;
+    }
+
+    int limit() {
+        return limit;
     }
 
     boolean truncated() {

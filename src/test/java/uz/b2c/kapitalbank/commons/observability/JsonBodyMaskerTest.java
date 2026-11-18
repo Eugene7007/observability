@@ -119,4 +119,26 @@ class JsonBodyMaskerTest {
 
         assertThat(masked).isEqualTo("{\"text\":\"visible\",\"sms\":{\"text\":\"***\"}}");
     }
+
+    @Test
+    void nameValuePairsAreMaskedInAnyFieldOrderAndBusinessPairsStay() {
+        JsonBodyMasker masker = new JsonBodyMasker(MaskingRules.base());
+        String json = "{\"params\":[{\"name\":\"password\",\"value\":\"x1\"},{\"name\":\"amount\",\"value\":\"100\"},"
+            + "{\"value\":\"200\",\"name\":\"sum\"},{\"value\":\"x2\",\"key\":\"cvv\"}],\"value\":\"top\","
+            + "\"a\":{\"b\":{\"value\":\"v1\"},\"name\":\"cvv\",\"value\":\"x3\"}}";
+        byte[] data = json.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+        assertThat(masker.mask(data, data.length, false)).isEqualTo(
+            "{\"params\":[{\"name\":\"password\",\"value\":\"***\"},{\"name\":\"amount\",\"value\":\"100\"},"
+                + "{\"value\":\"200\",\"name\":\"sum\"},{\"value\":\"***\",\"key\":\"cvv\"}],\"value\":\"top\","
+                + "\"a\":{\"b\":{\"value\":\"v1\"},\"name\":\"cvv\",\"value\":\"***\"}}");
+    }
+
+    @Test
+    void valueOfObjectCutBeforeItsNameIsHidden() {
+        JsonBodyMasker masker = new JsonBodyMasker(MaskingRules.base());
+        byte[] data = "[{\"value\":\"S3cr3t\",\"key\":\"password\"}]".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+        assertThat(masker.mask(data, 20, true)).doesNotContain("S3cr3t").contains("\"value\":\"***\"");
+    }
 }

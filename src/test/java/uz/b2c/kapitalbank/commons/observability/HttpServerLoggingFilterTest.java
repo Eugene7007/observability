@@ -105,12 +105,9 @@ class HttpServerLoggingFilterTest {
     }
 
     @Test
-    void withoutBodyPathsRequestIsNotWrappedAndBodiesAreNotLogged() throws Exception {
+    void successOutsideBodyPathsHasNoBodies() throws Exception {
         MockHttpServletRequest request = post("/internal/v1/uzcard/cards/registration", "{\"pan\":\"1\"}".getBytes());
-        FilterChain chain = (req, res) -> {
-            assertThat(req).isSameAs(request);
-            ((HttpServletResponse) res).setStatus(201);
-        };
+        FilterChain chain = (req, res) -> ((HttpServletResponse) res).setStatus(201);
 
         filter(List.of()).doFilter(request, new MockHttpServletResponse(), chain);
 
@@ -120,16 +117,19 @@ class HttpServerLoggingFilterTest {
     }
 
     @Test
-    void failureIsLoggedAsWarnAndRethrown() {
+    void failureIsLoggedAsErrorAndRethrown() {
         FilterChain chain = (req, res) -> {
             throw new IllegalStateException("boom");
         };
 
-        assertThatThrownBy(() -> filter(List.of("/**"))
-            .doFilter(new MockHttpServletRequest("GET", "/internal/v1/x"), new MockHttpServletResponse(), chain))
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/internal/v1/x");
+        assertThatThrownBy(() -> filter(List.of("/**")).doFilter(request, new MockHttpServletResponse(), chain))
             .isInstanceOf(IllegalStateException.class);
+        // запись ждёт страницу ошибки; без прохода ERROR её пишет слушатель завершения запроса
+        assertThat(sink.events).isEmpty();
+        HttpServerLoggingFilter.completeRequest(request);
 
-        HttpLogMessage message = sink.single(Level.WARN);
+        HttpLogMessage message = sink.single(Level.ERROR);
         assertThat(message.get("http.response.status_code")).isEqualTo("500");
         assertThat(message.get("error.type")).isEqualTo("java.lang.IllegalStateException");
     }
@@ -185,7 +185,7 @@ class HttpServerLoggingFilterTest {
     }
 
     @Test
-    void warnLevelStillLogsServerErrorsButSkipsSuccessAndBodies() throws Exception {
+    void warnLevelStillLogsErrorsWithBodiesButSkipsSuccess() throws Exception {
         HttpLogProperties properties = new HttpLogProperties();
         // прежние тесты проверяют запись тел при любом статусе; режим ON_ERROR проверяется отдельно
         properties.setBodies(HttpLogProperties.Bodies.ALWAYS);
@@ -194,13 +194,17 @@ class HttpServerLoggingFilterTest {
         HttpServerLoggingFilter warnFilter = new HttpServerLoggingFilter(new HttpLogSettings(properties), warnOnly);
         MockHttpServletRequest ok = new MockHttpServletRequest("GET", "/internal/v1/ok");
 
-        warnFilter.doFilter(ok, new MockHttpServletResponse(), (req, res) -> assertThat(req).isSameAs(ok));
+        warnFilter.doFilter(ok, new MockHttpServletResponse(), (req, res) -> { });
         warnFilter.doFilter(new MockHttpServletRequest("GET", "/internal/v1/down"), new MockHttpServletResponse(),
-            (req, res) -> ((HttpServletResponse) res).setStatus(503));
+            (req, res) -> {
+                ((HttpServletResponse) res).setStatus(503);
+                res.setContentType("application/json");
+                res.getWriter().write("{\"error\":\"down\"}");
+            });
 
-        HttpLogMessage message = warnOnly.single(Level.WARN);
+        HttpLogMessage message = warnOnly.single(Level.ERROR);
         assertThat(message.get("http.response.status_code")).isEqualTo("503");
-        assertThat(message.containsKey("http.response.body.content")).isFalse();
+        assertThat(message.get("http.response.body.content")).isEqualTo("{\"error\":\"down\"}");
     }
 
     static final class RecordingSink implements HttpLogSink {
