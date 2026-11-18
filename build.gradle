@@ -5,7 +5,9 @@ plugins {
 }
 
 group = 'uz.b2c.kapitalbank.commons'
-version = '2.0.8'
+// 1.x — логи в stdout и в прежний Kafka-топик; 2.0 — только stdout, когда логи собирает Vector (ломающее изменение).
+// Пилот на одном сервисе — release candidate; после пилота 1.0.0.
+version = '1.0.0-rc1'
 
 java {
     toolchain {
@@ -15,6 +17,7 @@ java {
 }
 
 repositories {
+    // первым: на сборочной ноде mavenLocal — это зеркало Nexus для сервисов
     mavenLocal()
     mavenCentral()
     maven {
@@ -24,7 +27,6 @@ repositories {
             password System.getenv("NEXUS_PASSWORD")
         }
     }
-    // последним: локальные сборки не должны подменять опубликованные артефакты
 }
 
 dependencyManagement {
@@ -79,6 +81,11 @@ dependencies {
     testImplementation 'org.springframework.kafka:spring-kafka'
 }
 
+// logback из стартеров в тестах не нужен: библиотека работает на log4j2, как и сервисы
+configurations.matching { it.name.startsWith('test') }.configureEach {
+    exclude group: 'org.springframework.boot', module: 'spring-boot-starter-logging'
+}
+
 tasks.named('test') {
     useJUnitPlatform()
     // сквозной тест перенастраивает log4j2 глобально, поэтому идёт отдельной задачей в своей JVM
@@ -92,6 +99,8 @@ def e2eTest = tasks.register('e2eTest', Test) {
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
     include '**/e2e/**'
+    // каждый сквозной тест — в своей JVM: Spring Boot перенастраивает log4j2 глобально
+    forkEvery = 1
 }
 tasks.named('check') {
     dependsOn e2eTest

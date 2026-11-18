@@ -142,7 +142,7 @@ class ReviewFindingsTest {
         response.setStatus(500);
         ((MockAsyncContext) request.getAsyncContext()).complete();
 
-        HttpLogMessage message = sink.single(Level.WARN);
+        HttpLogMessage message = sink.single(Level.ERROR);
         assertThat(message.get("http.response.status_code")).isEqualTo("500");
         assertThat(message.get("http.request.body.content")).isEqualTo("{\"cvv\":\"***\"}");
     }

@@ -61,7 +61,7 @@ class BodyOnErrorTest {
     void failedIncomingRequestHasMaskedBodies() throws Exception {
         serve(422);
 
-        HttpLogMessage message = sink.single(Level.INFO);
+        HttpLogMessage message = sink.single(Level.WARN);
         assertThat(message.get("http.request.body.content")).isEqualTo("{\"pan\":\"860051******8413\"}");
         assertThat(message.get("http.response.body.content")).isEqualTo("{\"error\":\"declined\"}");
     }
@@ -90,7 +90,7 @@ class BodyOnErrorTest {
     void failedOutgoingCallHasBodies() throws Exception {
         call(HttpStatus.BAD_GATEWAY);
 
-        HttpLogMessage message = sink.single(Level.WARN);
+        HttpLogMessage message = sink.single(Level.ERROR);
         assertThat(message.get("http.request.body.content")).isEqualTo("{\"pan\":\"860051******8413\"}");
         assertThat(message.get("http.response.body.content")).isEqualTo("{\"code\":-1}");
     }

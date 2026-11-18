@@ -49,31 +49,45 @@ public final class MaskingRules {
     private static final Set<String> HIDE_ANYWHERE = Set.of(
         "cvv", "cvv2", "cvc", "cvc2", "pinfl", "otp", "password", "passwd", "pwd", "secret", "token", "tokens",
         "passport", "jwt", "credential", "credentials", "authorization", "cookie", "jshshir", "dob", "birthday",
-        "address");
+        "address",
+        // чувствительные аутентификационные данные карты (PCI DSS): не хранятся ни в каком виде
+        "track1", "track2", "pvv", "cavv", "icvv", "pinblock",
+        // ПИНФЛ и ИНН (СТИР)
+        "pnfl", "stir");
 
     /** Последнее слово имени, при котором значение скрывается целиком. */
-    private static final Set<String> HIDE_LAST = Set.of("pin", "expiry", "smscode", "birthdate", "birth");
+    private static final Set<String> HIDE_LAST = Set.of(
+        "pin", "expiry", "expire", "expiration", "smscode", "birthdate", "birth", "inn", "tin", "codeword");
 
     /** Пары слов в конце имени, при которых значение скрывается целиком. */
     private static final Set<String> HIDE_LAST_PAIR = Set.of(
         "pin code", "sms code", "birth date", "date birth", "series number", "valid to", "exp date", "expiry date",
         "secret key", "api key", "private key", "card expiry", "valid thru", "doc number", "document number",
-        "doc no", "document no", "doc num", "document num");
+        "doc no", "document no", "doc num", "document num",
+        "expiration date", "expire date", "exp month", "exp year", "expiry month", "expiry year",
+        "track data", "pin block", "national id", "personal number", "doc series", "document series",
+        "doc serial", "document serial", "code word");
 
     private static final Set<String> PAN_LAST = Set.of("pan", "pan2", "hpan", "crefno", "cardnumber", "cardno",
         // processingKey — номер карты в путях и телах обмена с процессингом (recipient-info/{processingKey})
         "processingkey");
-    private static final Set<String> PAN_LAST_PAIR = Set.of("card number", "card no", "card num", "cref no");
+    private static final Set<String> PAN_LAST_PAIR = Set.of(
+        "card number", "card no", "card num", "cref no", "processing key");
 
-    private static final Set<String> TAIL_LAST = Set.of("phone", "msisdn", "account", "accno", "aacct", "iban");
+    private static final Set<String> TAIL_LAST = Set.of(
+        "phone", "msisdn", "account", "accno", "aacct", "iban", "mobile", "tel", "telephone");
     private static final Set<String> TAIL_LAST_PAIR = Set.of(
-        "phone number", "phone no", "account number", "account no", "acc no", "acc number");
+        "phone number", "phone no", "account number", "account no", "acc no", "acc number", "mobile number",
+        "mobile no", "tel number", "tel no");
     private static final Set<String> TAIL_ANYWHERE = Set.of("phone", "msisdn");
 
     private static final Set<String> NAME_QUALIFIERS = Set.of(
         "first", "last", "middle", "full", "holder", "embos", "client", "customer", "sender", "receiver",
-        "recipient", "owner", "cardholder", "given", "family", "sur", "father", "patronymic");
-    private static final Set<String> NAME_LAST = Set.of("surname", "fio", "patronymic", "fullname", "holder", "cardholder");
+        "recipient", "owner", "cardholder", "given", "family", "sur", "father", "patronymic", "embossed",
+        "beneficiary", "payer", "payee");
+    private static final Set<String> NAME_LAST = Set.of(
+        "surname", "fio", "patronymic", "fullname", "holder", "cardholder", "firstname", "lastname", "middlename",
+        "givenname", "familyname", "nameoncard");
 
     /** Объекты, у которых поле {@code name} — имя человека: {"client":{"name":"…"}}. */
     static final Set<String> PERSON_OBJECTS = Set.of(
@@ -86,7 +100,11 @@ public final class MaskingRules {
         "security code", "auth code", "check code");
     private static final Set<String> URL_LAST = Set.of("url", "uri", "link", "href");
 
-    private static final int CACHE_LIMIT = 50_000;
+    private static final int CACHE_LIMIT = 10_000;
+    /** Длиннее — не кэшируется: имена полей короткие, а длинный ключ — либо мусор, либо атака на память. */
+    private static final int CACHE_KEY_MAX = 64;
+    /** С таким числом цифр имя не кэшируется: ключи-номера телефонов и карт — ПДн, им не место в хипе навсегда. */
+    private static final int CACHE_KEY_MAX_DIGITS = 4;
 
     private static volatile MaskingRules current = new MaskingRules(Map.of(), List.of());
 
@@ -142,14 +160,44 @@ public final class MaskingRules {
         if (cached != null) {
             return cached.orElse(null);
         }
+        Rule rule = compute(name);
+        if (cache.size() < CACHE_LIMIT && cacheable(name)) {
+            cache.put(name, Optional.ofNullable(rule));
+        }
+        return rule;
+    }
+
+    /**
+     * Правило без кэша — для значений из тела, которые называют поле ({@code {"name":"password","value":…}}):
+     * в них бывают ФИО и произвольный текст, и кэшировать их нельзя.
+     */
+    public Rule ruleForUncached(final String name) {
+        if (name == null || name.isEmpty() || name.length() > CACHE_KEY_MAX) {
+            return null;
+        }
+        Optional<Rule> cached = cache.get(name);
+        return cached != null ? cached.orElse(null) : compute(name);
+    }
+
+    private Rule compute(final String name) {
         Rule rule = baseRule(name);
         if (rule == null) {
             rule = teamNames.get(normalize(name));
         }
-        if (cache.size() < CACHE_LIMIT) {
-            cache.put(name, Optional.ofNullable(rule));
-        }
         return rule;
+    }
+
+    private static boolean cacheable(final String name) {
+        if (name.length() > CACHE_KEY_MAX) {
+            return false;
+        }
+        int digits = 0;
+        for (int i = 0; i < name.length(); i++) {
+            if (Character.isDigit(name.charAt(i)) && ++digits >= CACHE_KEY_MAX_DIGITS) {
+                return false;
+            }
+        }
+        return true;
     }
 
     List<PathRule> pathRules() {

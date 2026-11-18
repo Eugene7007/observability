@@ -74,4 +74,13 @@ class LogTextMaskerTest {
 
         assertThat(masked).isEqualTo("loyaltyId=***, pan=860012******1233, token=***");
     }
+
+    @Test
+    void cardNumberGluedToLettersIsMaskedButIdentifiersStay() {
+        assertThat(LogTextMasker.mask("ref N8600123456781233 x")).isEqualTo("ref N860012******1233 x");
+        assertThat(LogTextMasker.mask("8600123456781233_x")).isEqualTo("860012******1233_x");
+        assertThat(LogTextMasker.mask("card 8600123456781233phone")).isEqualTo("card 860012******1233phone");
+        // не номер карты: короткие числа и неверная контрольная сумма у идентификатора
+        assertThat(LogTextMasker.mask("order_12345 id8600123456781234")).isEqualTo("order_12345 id8600123456781234");
+    }
 }

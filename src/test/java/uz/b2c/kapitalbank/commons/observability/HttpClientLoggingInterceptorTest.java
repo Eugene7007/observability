@@ -67,14 +67,16 @@ class HttpClientLoggingInterceptorTest {
     }
 
     @Test
-    void withoutBodyPathsResponseIsNotWrapped() throws Exception {
-        MockClientHttpResponse wire = new MockClientHttpResponse(new byte[0], HttpStatus.BAD_GATEWAY);
+    void errorResponseIsCapturedEvenWithoutBodyPaths() throws Exception {
+        MockClientHttpResponse wire = new MockClientHttpResponse("{\"code\":-1}".getBytes(), HttpStatus.BAD_GATEWAY);
         ClientHttpResponse response = interceptor(List.of()).intercept(request(), new byte[0], (req, b) -> wire);
 
-        assertThat(response).isSameAs(wire);
-        HttpLogMessage message = sink.single(Level.WARN);
+        assertThat(response).isNotSameAs(wire);
+        response.getBody().readAllBytes();
+        response.close();
+        HttpLogMessage message = sink.single(Level.ERROR);
         assertThat(message.get("http.response.status_code")).isEqualTo("502");
-        assertThat(message.containsKey("http.request.body.content")).isFalse();
+        assertThat(message.get("http.response.body.content")).isEqualTo("{\"code\":-1}");
     }
 
     @Test
@@ -99,7 +101,7 @@ class HttpClientLoggingInterceptorTest {
             throw new SocketTimeoutException("Read timed out");
         })).isInstanceOf(IOException.class);
 
-        assertThat(warnOnly.single(Level.WARN).get("error.type")).isEqualTo("java.net.SocketTimeoutException");
+        assertThat(warnOnly.single(Level.ERROR).get("error.type")).isEqualTo("java.net.SocketTimeoutException");
     }
 
     @Test
@@ -111,7 +113,7 @@ class HttpClientLoggingInterceptorTest {
         assertThatThrownBy(() -> interceptor(List.of("/**")).intercept(request(), new byte[0], execution))
             .isInstanceOf(IOException.class);
 
-        HttpLogMessage message = sink.single(Level.WARN);
+        HttpLogMessage message = sink.single(Level.ERROR);
         assertThat(message.get("error.type")).isEqualTo("java.net.SocketTimeoutException");
         assertThat(message.getFormattedMessage()).contains("FAILED (SocketTimeoutException)");
     }
