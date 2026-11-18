@@ -58,8 +58,6 @@ dependencies {
         exclude group: 'org.springframework.boot', module: 'spring-boot-starter-logging'
     }
 
-    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-xml'
-
     // Всё остальное у сервиса уже есть, поэтому compileOnly: библиотека не навязывает версии.
     compileOnly 'org.springframework.boot:spring-boot-autoconfigure'
     compileOnly 'org.springframework:spring-webmvc'

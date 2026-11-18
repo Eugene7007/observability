@@ -82,6 +82,9 @@ public class HttpServerLoggingFilter extends OncePerRequestFilter {
         if (capturedResponse != null) {
             capturedResponse.flushWriter();
         }
+        if (capturedRequest != null && settings.includeBodies(response.getStatus(), failure != null)) {
+            capturedRequest.captureUnread();
+        }
         log(request, response, capturedRequest, capturedResponse, failure, start);
     }
 

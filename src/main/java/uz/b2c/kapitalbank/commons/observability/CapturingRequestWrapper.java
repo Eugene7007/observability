@@ -8,6 +8,8 @@ import jakarta.servlet.http.HttpServletRequestWrapper;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Отдаёт приложению тело запроса как есть и попутно запоминает первые байты для лога.
@@ -19,14 +21,39 @@ final class CapturingRequestWrapper extends HttpServletRequestWrapper {
     private ServletInputStream stream;
     private BufferedReader reader;
 
-    CapturingRequestWrapper(final HttpServletRequest request, final int limit) throws IOException {
+    CapturingRequestWrapper(final HttpServletRequest request, final int limit) {
         super(request);
         this.capture = new BodyCapture(limit);
-        this.capture.write(request.getInputStream().readAllBytes(), 0, request.getContentLength());
     }
 
     BodyCapture capture() {
         return capture;
+    }
+
+    /**
+     * Дочитывает тело, которое приложение не прочитало: запрос отклонён раньше (400 по заголовку, 404, 405).
+     * Читается не больше лимита захвата и ещё один байт — чтобы знать, обрезано ли тело. Вызывается только
+     * после обработки запроса, когда приложению тело уже не нужно. Читать тело заранее, до приложения, нельзя:
+     * поток запроса читается один раз, и контроллер получил бы пустое тело.
+     */
+    void captureUnread() {
+        if (capture.total() > 0 || capture.limit() == 0 || getContentLengthLong() <= 0) {
+            return;
+        }
+        try {
+            ServletInputStream in = getInputStream();
+            int remaining = capture.limit() + 1;
+            byte[] chunk = new byte[Math.min(remaining, 8192)];
+            while (remaining > 0) {
+                int read = in.read(chunk, 0, Math.min(chunk.length, remaining));
+                if (read < 0) {
+                    break;
+                }
+                remaining -= read;
+            }
+        } catch (IOException | IllegalStateException e) {
+            // тело уже недоступно (например, контейнер разобрал его как параметры формы) — пишем без него
+        }
     }
 
     @Override
@@ -39,14 +66,12 @@ final class CapturingRequestWrapper extends HttpServletRequestWrapper {
 
     @Override
     public BufferedReader getReader() throws IOException {
-//        if (reader == null) {
-//            String encoding = getCharacterEncoding();
-//            Charset charset = encoding == null ? StandardCharsets.UTF_8 : Charset.forName(encoding);
-//            reader = new BufferedReader(new InputStreamReader(getInputStream(), charset));
-//        }
-//        return reader;
-
-        return new BufferedReader(new InputStreamReader(this.getInputStream()));
+        if (reader == null) {
+            String encoding = getCharacterEncoding();
+            Charset charset = encoding == null ? StandardCharsets.UTF_8 : Charset.forName(encoding);
+            reader = new BufferedReader(new InputStreamReader(getInputStream(), charset));
+        }
+        return reader;
     }
 
     private static final class TeeInputStream extends ServletInputStream {

@@ -65,6 +65,10 @@ final class BodyCapture {
         return total;
     }
 
+    int limit() {
+        return limit;
+    }
+
     boolean truncated() {
         return total > size;
     }

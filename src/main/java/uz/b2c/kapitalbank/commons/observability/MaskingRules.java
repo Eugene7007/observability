@@ -60,7 +60,9 @@ public final class MaskingRules {
         "secret key", "api key", "private key", "card expiry", "valid thru", "doc number", "document number",
         "doc no", "document no", "doc num", "document num");
 
-    private static final Set<String> PAN_LAST = Set.of("pan", "pan2", "hpan", "crefno", "cardnumber", "cardno", "processingKey");
+    private static final Set<String> PAN_LAST = Set.of("pan", "pan2", "hpan", "crefno", "cardnumber", "cardno",
+        // processingKey — номер карты в путях и телах обмена с процессингом (recipient-info/{processingKey})
+        "processingkey");
     private static final Set<String> PAN_LAST_PAIR = Set.of("card number", "card no", "card num", "cref no");
 
     private static final Set<String> TAIL_LAST = Set.of("phone", "msisdn", "account", "accno", "aacct", "iban");
