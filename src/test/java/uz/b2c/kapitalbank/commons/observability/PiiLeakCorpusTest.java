@@ -43,6 +43,37 @@ class PiiLeakCorpusTest {
         + "<split>86001234<b/>56781233</split><split2>8600123456<!-- x -->781233</split2>"
         + "<token>eyJhbGciOiJIUzI1NiJ9</token></Pay></Body></Envelope>";
 
+    /** SOAP-ответ процессинга в духе Tieto/Humo: поля карты и клиента по их именам. */
+    private static final String PROCESSING = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><soapenv:Envelope "
+        + "xmlns:soapenv=\"http://schemas.xmlsoap.org/soap/envelope/\"><soapenv:Body><queryCardInfoResponse><row>"
+        + "<CARD>" + PAN + "</CARD><CARD_NUMBER>" + PAN + "</CARD_NUMBER><primaryAccountNumber>" + VISA
+        + "</primaryAccountNumber><EXPIRY>2712</EXPIRY><EXPIRY1>2712</EXPIRY1><CARD_ACCT>20208000900123456001</CARD_ACCT>"
+        + "<F_NAMES>Ivan</F_NAMES><SURNAME>Ivanov</SURNAME><ABVR_NAME>IVANOV I</ABVR_NAME><CARD_NAME>IVAN IVANOV</CARD_NAME>"
+        + "<PERSON_CODE>31234567890123</PERSON_CODE><R_PCODE>31234567890123</R_PCODE><B_DATE>1990-01-31</B_DATE>"
+        + "<R_STREET>Amir Temur 15</R_STREET><SERIAL_NO>AA1234567</SERIAL_NO><ID_CARD>AA1234567</ID_CARD>"
+        + "<MB_PHONE>998901234567</MB_PHONE><encryptedPin>9F1A2B3C4D5E</encryptedPin>"
+        + "<cardSecurityCode>739</cardSecurityCode><TRAN_AMT>150000</TRAN_AMT><RESPONSE_CODE>0</RESPONSE_CODE>"
+        + "</row></queryCardInfoResponse></soapenv:Body></soapenv:Envelope>";
+
+    private static final String[] PROCESSING_MARKERS = {
+        "20208000900123456001", "Ivanov", "IVANOV", "IVAN IVANOV", "1990-01-31", "Amir Temur", "2712", "9F1A2B3C4D5E", ">739<"};
+
+    @Test
+    void processingSoapDoesNotLeak() {
+        String rendered = settings.renderBody(bytes(PROCESSING), "text/xml; charset=utf-8");
+        assertNoLeak("processing", rendered);
+        for (String marker : PROCESSING_MARKERS) {
+            assertThat(rendered).as("processing leaks %s: %s", marker, rendered).doesNotContain(marker);
+        }
+        // деловые поля остаются для разбора
+        assertThat(rendered).contains("<TRAN_AMT>150000</TRAN_AMT>").contains("<RESPONSE_CODE>0</RESPONSE_CODE>");
+        XmlBodyMasker xml = new XmlBodyMasker(MaskingRules.base());
+        byte[] data = bytes(PROCESSING);
+        for (int cut = 1; cut < data.length; cut++) {
+            assertNoLeak("processing@" + cut, xml.mask(data, cut, true));
+        }
+    }
+
     private static final String TEXT = "cardNumber=" + PAN + " cvv=739 pinfl=31234567890123 phone=998901234567 "
         + "passport=AA1234567 password=S3cr3t!x otp=482913 note: " + VISA + " token=eyJhbGciOiJIUzI1NiJ9 ref=N" + PAN;
 

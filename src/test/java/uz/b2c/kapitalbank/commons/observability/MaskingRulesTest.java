@@ -78,4 +78,32 @@ class MaskingRulesTest {
             assertThat(rule == null || rule == MaskingRules.Rule.CODE).as(name).isTrue();
         }
     }
+
+    @Test
+    void processingFieldsOfTietoAndHumo() {
+        java.util.Map<String, MaskingRules.Rule> expected = new java.util.LinkedHashMap<>();
+        expected.put("primaryAccountNumber", MaskingRules.Rule.PAN);
+        expected.put("CARD_NUMBER", MaskingRules.Rule.PAN);
+        for (String name : new String[] {"PERSON_CODE", "R_PCODE", "B_DATE", "R_STREET", "EXPIRY", "EXPIRY1", "EXP_DATE",
+            "ID_CARD", "SERIAL_NO", "cardSecurityCode", "encryptedPin", "pnfl"}) {
+            expected.put(name, MaskingRules.Rule.HIDE);
+        }
+        for (String name : new String[] {"F_NAMES", "SURNAME", "ABVR_NAME", "CARD_NAME", "cardName"}) {
+            expected.put(name, MaskingRules.Rule.NAME);
+        }
+        for (String name : new String[] {"CARD_ACCT", "ACCOUNT_NO", "MB_PHONE", "R_MOB_PHONE"}) {
+            expected.put(name, MaskingRules.Rule.TAIL);
+        }
+        MaskingRules rules = MaskingRules.base();
+        expected.forEach((name, rule) -> assertThat(rules.ruleFor(name)).as(name).isEqualTo(rule));
+    }
+
+    @Test
+    void processingBusinessFieldsStayVisible() {
+        MaskingRules rules = MaskingRules.base();
+        for (String name : new String[] {"TRAN_AMT", "TRAN_CCY", "TRAN_DATE_TIME", "RESPONSE_CODE", "STAN", "MCC", "TERM_ID",
+            "REF_NUMBER", "CCY_EXP", "STATUS1", "PIN_TRY_COUNT", "BANK_C", "GROUPC", "CITY", "COUNTRY"}) {
+            assertThat(rules.ruleFor(name)).as(name).isNull();
+        }
+    }
 }
