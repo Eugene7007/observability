@@ -68,16 +68,18 @@ implementation 'uz.b2c.kapitalbank.commons:observability-starter:<версия>'
 
 | Что | Примеры имён | Как |
 | --- | --- | --- |
-| Номер карты | `pan`, `cardNumber`, `card_number`, `senderCardNumber`, `cardNo`, `CREF_NO`, `hpan`, `processingKey`, `recipientProcessingKey` | первые 6 и последние 4 цифры |
-| Телефон, счёт | `phone`, `phoneNumber`, `mobilePhone`, `mobile`, `mobileNumber`, `tel`, `msisdn`, `account`, `accountNumber`, `accNo`, `iban` | последние 4 |
-| ФИО | `firstName`, `firstname`, `lastName`, `middlename`, `fullName`, `holderName`, `cardHolder`, `EMBOS_NAME`, `embossedName`, `nameOnCard`, `beneficiaryName`, `payerName`, `surname`; `name` внутри объектов `client`, `card`, `holder`, `customer`, `recipient` и т. п. | первая буква |
+| Номер карты | `pan`, `cardNumber`, `card_number`, `senderCardNumber`, `cardNo`, `CREF_NO`, `hpan`, `processingKey`, `recipientProcessingKey`, `primaryAccountNumber` | первые 6 и последние 4 цифры |
+| Телефон, счёт | `phone`, `phoneNumber`, `mobilePhone`, `mobile`, `mobileNumber`, `tel`, `msisdn`, `account`, `accountNumber`, `accNo`, `CARD_ACCT`, `iban` | последние 4 |
+| ФИО | `firstName`, `firstname`, `lastName`, `middlename`, `fullName`, `holderName`, `cardHolder`, `EMBOS_NAME`, `embossedName`, `nameOnCard`, `beneficiaryName`, `payerName`, `surname`, `F_NAMES`, `ABVR_NAME`, `CARD_NAME`, `cardName`; `name` внутри объектов `client`, `card`, `holder`, `customer`, `recipient` и т. п. | первая буква |
 | Почта | `email` | первая буква и домен: `i***@mail.uz` |
-| Секреты и документы | всё, где есть `cvv`, `cvc`, `pin`, `pinfl`, `pnfl`, `jshshir`, `stir`, `otp`, `password`, `secret`, `token`, `passport`, `address`, `track1`, `track2`, `pinBlock`, `pvv`, `cavv`, `icvv`; `birthDate`, `dateOfBirth`, `birthday`, `dob`, `expiry`, `expirationDate`, `expireDate`, `expMonth`, `expYear`, `validTo`, `validThru`, `documentNumber`, `docSeries`, `seriesNumber`, `nationalId`, `personalNumber`, `inn`, `tin`, `codeWord`, `smsCode` | целиком |
+| Секреты и документы | всё, где есть `cvv`, `cvc`, `pin`, `pinfl`, `pnfl`, `jshshir`, `stir`, `otp`, `password`, `secret`, `token`, `passport`, `address`, `track1`, `track2`, `pinBlock`, `pvv`, `cavv`, `icvv`; `birthDate`, `dateOfBirth`, `birthday`, `dob`, `expiry`, `expirationDate`, `expireDate`, `expMonth`, `expYear`, `validTo`, `validThru`, `documentNumber`, `docSeries`, `seriesNumber`, `nationalId`, `personalNumber`, `inn`, `tin`, `codeWord`, `smsCode`, `cardSecurityCode`; поля процессинга `PERSON_CODE`, `R_PCODE`, `B_DATE`, `R_STREET`, `ID_CARD`, `SERIAL_NO`, `EXPIRY1` | целиком |
 | Коды подтверждения | `verificationCode`, `confirmCode`, `securityCode` и т. п. | 4–8 цифр скрываются в любом виде: строкой, числом, в тексте |
 | Поле `code` | `code` | строка из цифр скрывается (OTP); число и текст остаются: это коды ошибок, `"CARD_EXPIRED"` |
 | Адреса | `url`, `uri`, `link` | остаются схема, хост и путь; query скрывается, в пути маскируются длинные числа и карты |
 
 Независимо от имён в любом тексте маскируются номера карт (13–19 цифр, в том числе группами через пробел, дефис или скобки, с проверкой Луна), мобильные номера `998XXXXXXXXX` и `+998 (XX) XXX-XX-XX` и `Bearer <токен>`. Поля команды только добавляются к базе: если имя распознала база, применяется её правило, и ослабить его команда не может.
+
+Номер на конце имени поля не меняет правило: `EXPIRY1` маскируется как `EXPIRY`, `PHONE2` — как `PHONE`. Имена полей процессингов Tieto и Humo входят в базовый словарь, их проверяет корпус `PiiLeakCorpusTest` на SOAP-ответе процессинга. SOAP-конверты обычно больше 4 КБ, поэтому адаптерам процессинга стоит поднять `LIB_OBSERVABILITY_HTTP_LOG_MAX_BODY_BYTES`, например до 16384.
 
 ```yaml
 lib:

@@ -57,7 +57,10 @@ public final class MaskingRules {
 
     /** Последнее слово имени, при котором значение скрывается целиком. */
     private static final Set<String> HIDE_LAST = Set.of(
-        "pin", "expiry", "expire", "expiration", "smscode", "birthdate", "birth", "inn", "tin", "codeword");
+        "pin", "expiry", "expire", "expiration", "smscode", "birthdate", "birth", "inn", "tin", "codeword",
+        // процессинг (Tieto, Humo): R_PCODE — персональный код (ПИНФЛ), B_DATE — дата рождения, R_STREET — улица,
+        // cardSecurityCode — CVV2 (3 цифры, поэтому не правило кода подтверждения)
+        "pcode", "bdate", "street", "cardsecuritycode");
 
     /** Пары слов в конце имени, при которых значение скрывается целиком. */
     private static final Set<String> HIDE_LAST_PAIR = Set.of(
@@ -66,16 +69,20 @@ public final class MaskingRules {
         "doc no", "document no", "doc num", "document num",
         "expiration date", "expire date", "exp month", "exp year", "expiry month", "expiry year",
         "track data", "pin block", "national id", "personal number", "doc series", "document series",
-        "doc serial", "document serial", "code word");
+        "doc serial", "document serial", "code word",
+        // процессинг: PERSON_CODE — ПИНФЛ, ID_CARD — удостоверение личности, SERIAL_NO — серия документа
+        "person code", "id card", "serial no");
 
     private static final Set<String> PAN_LAST = Set.of("pan", "pan2", "hpan", "crefno", "cardnumber", "cardno",
         // processingKey — номер карты в путях и телах обмена с процессингом (recipient-info/{processingKey})
-        "processingkey");
+        "processingkey",
+        // primaryAccountNumber (ISO 8583) — номер карты, а не счёт
+        "primaryaccountnumber");
     private static final Set<String> PAN_LAST_PAIR = Set.of(
         "card number", "card no", "card num", "cref no", "processing key");
 
     private static final Set<String> TAIL_LAST = Set.of(
-        "phone", "msisdn", "account", "accno", "aacct", "iban", "mobile", "tel", "telephone");
+        "phone", "msisdn", "account", "accno", "aacct", "acct", "iban", "mobile", "tel", "telephone");
     private static final Set<String> TAIL_LAST_PAIR = Set.of(
         "phone number", "phone no", "account number", "account no", "acc no", "acc number", "mobile number",
         "mobile no", "tel number", "tel no");
@@ -84,10 +91,14 @@ public final class MaskingRules {
     private static final Set<String> NAME_QUALIFIERS = Set.of(
         "first", "last", "middle", "full", "holder", "embos", "client", "customer", "sender", "receiver",
         "recipient", "owner", "cardholder", "given", "family", "sur", "father", "patronymic", "embossed",
-        "beneficiary", "payer", "payee");
+        "beneficiary", "payer", "payee",
+        // процессинг: ABVR_NAME — сокращённое имя клиента, CARD_NAME — имя на карте (эмбоссирование)
+        "abvr", "card");
     private static final Set<String> NAME_LAST = Set.of(
         "surname", "fio", "patronymic", "fullname", "holder", "cardholder", "firstname", "lastname", "middlename",
-        "givenname", "familyname", "nameoncard");
+        "givenname", "familyname", "nameoncard",
+        // процессинг: F_NAMES — имена клиента
+        "fnames");
 
     /** Объекты, у которых поле {@code name} — имя человека: {"client":{"name":"…"}}. */
     static final Set<String> PERSON_OBJECTS = Set.of(
@@ -213,14 +224,16 @@ public final class MaskingRules {
         String last = words.get(words.size() - 1);
         String pair = words.size() > 1 ? words.get(words.size() - 2) + " " + last : null;
         String joined = String.join("", words);
+        // номер на конце поля (EXPIRY1, PHONE2) не меняет его смысл; cvv2 и pan2 есть в словаре и так
+        String lastBase = withoutTrailingDigits(last);
         Rule rule = null;
-        if (words.stream().anyMatch(HIDE_ANYWHERE::contains) || HIDE_LAST.contains(last)
+        if (words.stream().anyMatch(HIDE_ANYWHERE::contains) || HIDE_LAST.contains(last) || HIDE_LAST.contains(lastBase)
             || HIDE_LAST.contains(joined) || (pair != null && HIDE_LAST_PAIR.contains(pair))) {
             rule = Rule.HIDE;
         } else if (PAN_LAST.contains(last) || PAN_LAST.contains(joined)
             || (pair != null && PAN_LAST_PAIR.contains(pair))) {
             rule = Rule.PAN;
-        } else if (TAIL_LAST.contains(last) || TAIL_LAST.contains(joined)
+        } else if (TAIL_LAST.contains(last) || TAIL_LAST.contains(lastBase) || TAIL_LAST.contains(joined)
             || (pair != null && TAIL_LAST_PAIR.contains(pair)) || words.stream().anyMatch(TAIL_ANYWHERE::contains)) {
             rule = Rule.TAIL;
         } else if (NAME_LAST.contains(last) || NAME_LAST.contains(joined)
@@ -236,6 +249,15 @@ public final class MaskingRules {
             rule = Rule.CODE;
         }
         return rule;
+    }
+
+    private static String withoutTrailingDigits(final String word) {
+        int end = word.length();
+        while (end > 0 && Character.isDigit(word.charAt(end - 1))) {
+            end--;
+        }
+        // слово из одних цифр или слишком короткое без них (p1, a2) — как есть
+        return end >= 3 ? word.substring(0, end) : word;
     }
 
     /**
