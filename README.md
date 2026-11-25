@@ -111,6 +111,74 @@ lib:
 
 Разбор линейный, без регулярных выражений, вложенность ограничена. Текст длиннее 32 КБ обрезается, оборванный номер скрывается.
 
+## Формат логов (контракт)
+
+Каждая запись — один JSON-объект на строку в stdout. На этот формат опираются сбор логов (Vector), хранилище, дашборды и алерты, поэтому он зафиксирован как контракт. Внутри 1.x формат меняется только добавлением полей. Переименование, удаление поля или смена его типа возможны только в новой мажорной версии и с предупреждением DevOps заранее.
+
+Контракт проверяет тест `e2e/LogFormatContractTest`: он пишет через настоящий log4j2 библиотеки по записи каждого вида и сверяет имена и типы полей с эталоном `src/test/resources/log-format-contract.json`. Пропавшее или переименованное поле, сменившийся тип и новое поле роняют сборку. Чтобы добавить поле, его вносят в эталон и в таблицы ниже в том же изменении.
+
+Общие правила:
+- Поле без значения не пишется вовсе, `null` в выводе не бывает. Например, `user_guid` есть только в запросах после авторизации.
+- `@timestamp` — UTC, ISO-8601 с миллисекундами: `2026-11-25T12:00:00.123Z`.
+- `level` — `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`. HTTP-записи: успех — `INFO`, 4xx — `WARN`, 5xx и исключение — `ERROR`.
+- Все текстовые значения уже замаскированы (раздел «Маскирование ПДн»).
+- Формат для прежнего Kafka-топика (`layout-legacy-kafka.json`) временный, уходит в 2.0 и под контракт не подпадает.
+
+### Поля каждой записи
+
+| Поле | Тип | Что содержит |
+| --- | --- | --- |
+| `@timestamp` | string | Время записи, UTC |
+| `level` | string | Уровень |
+| `logger` | string | Имя логгера. HTTP-записи: `observability.http.in`, `observability.http.out` |
+| `thread` | string | Поток |
+| `message` | string | Сообщение, замаскированное |
+| `service.name` | string | `spring.application.name` |
+| `service.version` | string | Переменная `SERVICE_VERSION`, иначе `unknown` |
+| `deployment.environment` | string | Переменная `DEPLOYMENT_ENVIRONMENT`, иначе `unknown` |
+| `trace_id` | string | Идентификатор трассы W3C |
+| `span_id` | string | Идентификатор спана |
+| `correlation_id` | string | Сквозной идентификатор запроса (совместимость со старыми сервисами) |
+| `client_device_id` | string | Идентификатор устройства клиента из заголовка |
+| `user_guid` | string | Пользователь, из baggage `userGuid` |
+| `device_id` | string | Устройство, из baggage `deviceId` |
+
+### Поля записи с исключением
+
+| Поле | Тип | Что содержит |
+| --- | --- | --- |
+| `error.type` | string | Полное имя класса исключения |
+| `error.message` | string | Сообщение исключения, замаскированное |
+| `error.stack_trace` | string | Стек, замаскированный и обрезанный |
+
+### Поля HTTP-записей
+
+Одна запись на обмен: `http.in` — входящий запрос к сервису, `http.out` — исходящий вызов через RestTemplate.
+
+| Поле | Тип | Где | Что содержит |
+| --- | --- | --- | --- |
+| `http.direction` | string | in, out | `in` или `out` |
+| `http.request.method` | string | in, out | Метод |
+| `url.path` | string | in | Путь без query, номер карты в пути замаскирован |
+| `http.route` | string | in | Шаблон маршрута Spring MVC, например `/api/v1/cards/{id}` |
+| `url.full` | string | out | Схема, хост, порт и путь, без query и учётных данных |
+| `http.response.status_code` | number | in, out | Статус; при исключении — 500 (in) или нет поля (out) |
+| `event.duration_ms` | number | in, out | Длительность обмена, мс |
+| `http.request.headers` | string | in, out | Разрешённые заголовки: `Имя=значение; Имя=значение` |
+| `http.request.body.bytes` | number | in, out | Полный размер тела запроса |
+| `http.request.body.content` | string | in, out | Тело запроса, замаскированное и обрезанное до `max-body-bytes` |
+| `http.response.body.bytes` | number | in, out | Размер тела ответа |
+| `http.response.body.content` | string | in, out | Тело ответа, замаскированное и обрезанное |
+| `error.type` | string | in, out | Класс исключения, если обмен упал |
+
+Поля тел есть только у 4xx, 5xx и исключений, а у успешных обменов — при `LIB_OBSERVABILITY_HTTP_LOG_BODIES=ALWAYS`.
+
+Пример записи:
+
+```json
+{"@timestamp":"2026-11-25T12:00:00.123Z","level":"WARN","logger":"observability.http.in","thread":"http-nio-8080-exec-1","message":"HTTP in POST /api/v1/transfers -> 422 in 37 ms","service.name":"p2p-service","service.version":"1.4.2","deployment.environment":"prod","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7","correlation_id":"c0ffee00-0000-4000-8000-000000000001","user_guid":"5d1c…","http.direction":"in","http.request.method":"POST","url.path":"/api/v1/transfers","http.route":"/api/v1/transfers","http.response.status_code":422,"event.duration_ms":37,"http.request.headers":"Accept-Language=ru-RU","http.request.body.bytes":64,"http.request.body.content":"{\"pan\":\"860012******1233\",\"amount\":100}","http.response.body.bytes":16,"http.response.body.content":"{\"code\":\"LIMIT\"}"}
+```
+
 ## Kafka
 
 Режим `STDOUT_AND_KAFKA` (по умолчанию в 1.x) включается, только если задан адрес Kafka: `LOGGING_KAFKA_SERVERS` или `logging.appender.kafka.bootstrap.servers`. Без адреса логи идут только в stdout, и при старте пишется предупреждение.
@@ -165,6 +233,7 @@ lib:
 `./gradlew build` запускает модульные тесты и отдельной задачей `e2eTest` — сквозные запуски Spring Boot, каждый в своей JVM:
 - логи в режиме Kafka с недоступным брокером;
 - actuator, Prometheus с тегом `application`, `traceId` и `userGuid` в логах;
+- `LogFormatContractTest` — контракт формата логов: имена и типы полей каждой записи сверяются с эталоном `log-format-contract.json`;
 - `TomcatTransparencyTest` — настоящий Tomcat: приложение получает тело байт в байт (JSON, 1 МБ, chunked, `getReader` с кодировкой, форма, multipart), а у каждой ошибки (400, 404, 405, 415, 500, асинхронный 503, тело отдельным пакетом) в логе есть замаскированное тело.
 
 Защитные модульные тесты:

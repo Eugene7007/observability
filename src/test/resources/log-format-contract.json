@@ -1,0 +1,52 @@
+{
+  "_comment": "Контракт формата логов lib-observability (JSON в stdout). Внутри 1.x — только добавление полей. Описание полей — README, раздел «Формат логов». Тест: e2e/LogFormatContractTest.",
+  "common": {
+    "@timestamp": "string",
+    "level": "string",
+    "logger": "string",
+    "thread": "string",
+    "message": "string",
+    "service.name": "string",
+    "service.version": "string",
+    "deployment.environment": "string",
+    "trace_id": "string",
+    "span_id": "string",
+    "correlation_id": "string",
+    "client_device_id": "string",
+    "user_guid": "string",
+    "device_id": "string"
+  },
+  "records": {
+    "log": {},
+    "error": {
+      "error.type": "string",
+      "error.message": "string",
+      "error.stack_trace": "string"
+    },
+    "http.in": {
+      "http.direction": "string",
+      "http.request.method": "string",
+      "http.route": "string",
+      "url.path": "string",
+      "http.request.headers": "string",
+      "http.request.body.bytes": "number",
+      "http.request.body.content": "string",
+      "http.response.status_code": "number",
+      "http.response.body.bytes": "number",
+      "http.response.body.content": "string",
+      "event.duration_ms": "number"
+    },
+    "http.out": {
+      "http.direction": "string",
+      "http.request.method": "string",
+      "url.full": "string",
+      "http.request.headers": "string",
+      "http.request.body.bytes": "number",
+      "http.request.body.content": "string",
+      "http.response.status_code": "number",
+      "http.response.body.bytes": "number",
+      "http.response.body.content": "string",
+      "event.duration_ms": "number"
+    }
+  }
+}
