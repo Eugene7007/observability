@@ -1,5 +1,5 @@
 {
-  "_comment": "Контракт формата логов lib-observability (JSON в stdout). Внутри 1.x — только добавление полей. Описание полей — README, раздел «Формат логов». Тест: e2e/LogFormatContractTest.",
+  "_comment": "Контракт формата логов lib-observability (JSON в stdout). Внутри 1.x — только добавление полей. 'data.*' — поля MapMessage приложения. Описание полей — README, раздел «Формат логов». Тесты: e2e/LogFormatContractTest и LogFormatContractKafkaTest.",
   "common": {
     "@timestamp": "string",
     "level": "string",
@@ -23,6 +23,9 @@
       "error.message": "string",
       "error.stack_trace": "string"
     },
+    "map": {
+      "data.*": "string"
+    },
     "http.in": {
       "http.direction": "string",
       "http.request.method": "string",
@@ -36,6 +39,19 @@
       "http.response.body.content": "string",
       "event.duration_ms": "number"
     },
+    "http.in.failed": {
+      "http.direction": "string",
+      "http.request.method": "string",
+      "http.route": "string",
+      "url.path": "string",
+      "http.request.headers": "string",
+      "http.request.body.bytes": "number",
+      "http.request.body.content": "string",
+      "http.response.status_code": "number",
+      "http.response.body.bytes": "number",
+      "event.duration_ms": "number",
+      "error.type": "string"
+    },
     "http.out": {
       "http.direction": "string",
       "http.request.method": "string",
@@ -47,6 +63,16 @@
       "http.response.body.bytes": "number",
       "http.response.body.content": "string",
       "event.duration_ms": "number"
+    },
+    "http.out.failed": {
+      "http.direction": "string",
+      "http.request.method": "string",
+      "url.full": "string",
+      "http.request.headers": "string",
+      "http.request.body.bytes": "number",
+      "http.request.body.content": "string",
+      "event.duration_ms": "number",
+      "error.type": "string"
     }
   }
 }

@@ -48,7 +48,7 @@ class PiiLeakCorpusTest {
         + "xmlns:soapenv=\"http://schemas.xmlsoap.org/soap/envelope/\"><soapenv:Body><queryCardInfoResponse><row>"
         + "<CARD>" + PAN + "</CARD><CARD_NUMBER>" + PAN + "</CARD_NUMBER><primaryAccountNumber>" + VISA
         + "</primaryAccountNumber><EXPIRY>2712</EXPIRY><EXPIRY1>2712</EXPIRY1><CARD_ACCT>20208000900123456001</CARD_ACCT>"
-        + "<F_NAMES>Ivan</F_NAMES><SURNAME>Ivanov</SURNAME><ABVR_NAME>IVANOV I</ABVR_NAME><CARD_NAME>IVAN IVANOV</CARD_NAME>"
+        + "<F_NAMES>Bahodir</F_NAMES><M_NAME>Rustamovich</M_NAME><E_MAILS>bahodir@mail.uz</E_MAILS><SURNAME>Ivanov</SURNAME><ABVR_NAME>IVANOV I</ABVR_NAME><CARD_NAME>IVAN IVANOV</CARD_NAME>"
         + "<PERSON_CODE>31234567890123</PERSON_CODE><R_PCODE>31234567890123</R_PCODE><B_DATE>1990-01-31</B_DATE>"
         + "<R_STREET>Amir Temur 15</R_STREET><SERIAL_NO>AA1234567</SERIAL_NO><ID_CARD>AA1234567</ID_CARD>"
         + "<MB_PHONE>998901234567</MB_PHONE><encryptedPin>9F1A2B3C4D5E</encryptedPin>"
@@ -56,7 +56,7 @@ class PiiLeakCorpusTest {
         + "</row></queryCardInfoResponse></soapenv:Body></soapenv:Envelope>";
 
     private static final String[] PROCESSING_MARKERS = {
-        "20208000900123456001", "Ivanov", "IVANOV", "IVAN IVANOV", "1990-01-31", "Amir Temur", "2712", "9F1A2B3C4D5E", ">739<"};
+        "20208000900123456001", "Bahodir", "Rustamovich", "bahodir@mail.uz", "Ivanov", "IVANOV", "IVAN IVANOV", "1990-01-31", "Amir Temur", "2712", "9F1A2B3C4D5E", ">739<"};
 
     @Test
     void processingSoapDoesNotLeak() {

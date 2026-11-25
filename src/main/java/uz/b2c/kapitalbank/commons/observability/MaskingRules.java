@@ -48,8 +48,10 @@ public final class MaskingRules {
     /** Слова, при наличии которых в любом месте имени значение скрывается целиком. */
     private static final Set<String> HIDE_ANYWHERE = Set.of(
         "cvv", "cvv2", "cvc", "cvc2", "pinfl", "otp", "password", "passwd", "pwd", "secret", "token", "tokens",
-        "passport", "jwt", "credential", "credentials", "authorization", "cookie", "jshshir", "dob", "birthday",
+        "passport", "jwt", "credential", "credentials", "cookie", "jshshir", "dob", "birthday",
         "address",
+        // код безопасности карты под другими именами (CSC, CVN)
+        "csc", "cvn",
         // чувствительные аутентификационные данные карты (PCI DSS): не хранятся ни в каком виде
         "track1", "track2", "pvv", "cavv", "icvv", "pinblock",
         // ПИНФЛ и ИНН (СТИР)
@@ -57,10 +59,14 @@ public final class MaskingRules {
 
     /** Последнее слово имени, при котором значение скрывается целиком. */
     private static final Set<String> HIDE_LAST = Set.of(
-        "pin", "expiry", "expire", "expiration", "smscode", "birthdate", "birth", "inn", "tin", "codeword",
-        // процессинг (Tieto, Humo): R_PCODE — персональный код (ПИНФЛ), B_DATE — дата рождения, R_STREET — улица,
-        // cardSecurityCode — CVV2 (3 цифры, поэтому не правило кода подтверждения)
-        "pcode", "bdate", "street", "cardsecuritycode");
+        "pin", "expiry", "expire", "expiration", "smscode", "birthdate", "birth", "inn", "tin", "codeword", "authorization",
+        "cred", "creds", "salt",
+        // ИНН: taxPayerCode, taxId
+        "taxpayercode", "taxpayerid", "taxpayernumber", "taxid",
+        // процессинг (Tieto, Humo): B_DATE — дата рождения, R_STREET и R_PCODE — улица и индекс адреса проживания,
+        // SERIAL_NO — серия документа клиента (только точное имя: terminalSerialNo и подобные остаются),
+        // cardSecurityCode — CVV2
+        "bdate", "street", "rpcode", "serialno", "cardsecuritycode");
 
     /** Пары слов в конце имени, при которых значение скрывается целиком. */
     private static final Set<String> HIDE_LAST_PAIR = Set.of(
@@ -69,9 +75,21 @@ public final class MaskingRules {
         "doc no", "document no", "doc num", "document num",
         "expiration date", "expire date", "exp month", "exp year", "expiry month", "expiry year",
         "track data", "pin block", "national id", "personal number", "doc series", "document series",
-        "doc serial", "document serial", "code word",
-        // процессинг: PERSON_CODE — ПИНФЛ, ID_CARD — удостоверение личности, SERIAL_NO — серия документа
-        "person code", "id card", "serial no");
+        "doc serial", "document serial", "code word", "expiration month", "expiration year",
+        "access key", "authorization header", "auth header", "birth place", "place birth",
+        // код безопасности карты: всегда секрет, в том числе из 3 цифр
+        "security code", "secure code", "verification value",
+        // процессинг: PERSON_CODE — ПИНФЛ, ID_CARD — удостоверение личности
+        "person code", "id card");
+
+    /** Слова документа и детали, при которых поле документа скрывается: documentSeria, docIssueDate, docGivePlace. */
+    private static final Set<String> DOC_WORDS = Set.of("doc", "docs", "document", "documents", "identity");
+    private static final Set<String> DOC_DETAIL_LAST = Set.of("number", "no", "num", "seria", "series", "serial", "place");
+    private static final Set<String> DOC_DETAIL_ANYWHERE = Set.of("issue", "issued", "give", "given", "issuer");
+
+    /** Суффиксы языка и алфавита: firstNameLatin, surnameCyr, lastNameEn — то же поле на другом языке. */
+    private static final Set<String> LANGUAGE_SUFFIXES = Set.of(
+        "en", "eng", "english", "ru", "rus", "uz", "uzb", "lat", "latin", "cyr", "cyrl", "cyrillic", "local", "native");
 
     private static final Set<String> PAN_LAST = Set.of("pan", "pan2", "hpan", "crefno", "cardnumber", "cardno",
         // processingKey — номер карты в путях и телах обмена с процессингом (recipient-info/{processingKey})
@@ -82,7 +100,8 @@ public final class MaskingRules {
         "card number", "card no", "card num", "cref no", "processing key");
 
     private static final Set<String> TAIL_LAST = Set.of(
-        "phone", "msisdn", "account", "accno", "aacct", "acct", "iban", "mobile", "tel", "telephone");
+        "phone", "phones", "telefon", "msisdn", "account", "accno", "aacct", "acct", "iban", "mobile", "tel",
+        "telephone");
     private static final Set<String> TAIL_LAST_PAIR = Set.of(
         "phone number", "phone no", "account number", "account no", "acc no", "acc number", "mobile number",
         "mobile no", "tel number", "tel no");
@@ -92,13 +111,15 @@ public final class MaskingRules {
         "first", "last", "middle", "full", "holder", "embos", "client", "customer", "sender", "receiver",
         "recipient", "owner", "cardholder", "given", "family", "sur", "father", "patronymic", "embossed",
         "beneficiary", "payer", "payee",
+        "second", "patronym",
         // процессинг: ABVR_NAME — сокращённое имя клиента, CARD_NAME — имя на карте (эмбоссирование)
         "abvr", "card");
     private static final Set<String> NAME_LAST = Set.of(
         "surname", "fio", "patronymic", "fullname", "holder", "cardholder", "firstname", "lastname", "middlename",
         "givenname", "familyname", "nameoncard",
-        // процессинг: F_NAMES — имена клиента
-        "fnames");
+        "patronym",
+        // процессинг: F_NAMES — имена клиента, M_NAME — отчество
+        "fnames", "mname");
 
     /** Объекты, у которых поле {@code name} — имя человека: {"client":{"name":"…"}}. */
     static final Set<String> PERSON_OBJECTS = Set.of(
@@ -108,7 +129,7 @@ public final class MaskingRules {
     /** Коды подтверждения: значение-строка из цифр скрывается, «CARD_EXPIRED» и числовые коды ошибок остаются. */
     private static final Set<String> DIGITS_PAIR = Set.of(
         "confirm code", "confirmation code", "verification code", "verify code", "activation code",
-        "security code", "auth code", "check code");
+        "auth code", "check code");
     private static final Set<String> URL_LAST = Set.of("url", "uri", "link", "href");
 
     private static final int CACHE_LIMIT = 10_000;
@@ -215,31 +236,52 @@ public final class MaskingRules {
         return teamPaths;
     }
 
-    /** Базовое правило банка по словам имени. */
+    /**
+     * Базовое правило банка по словам имени. Если по словам как есть правила нет, имя проверяется ещё раз без
+     * суффикса языка ({@code firstNameLatin} → first name) и без номеров на конце слов ({@code EXP_DATE1},
+     * {@code address2}): это то же поле.
+     */
     static Rule baseRule(final String name) {
         List<String> words = words(name);
+        if (words.isEmpty()) {
+            return null;
+        }
+        Rule rule = ruleForWords(words);
+        if (rule == null) {
+            List<String> withoutDigits = withoutTrailingDigits(words);
+            rule = ruleForWords(withoutLanguage(words));
+            if (rule == null) {
+                rule = ruleForWords(withoutDigits);
+            }
+            if (rule == null) {
+                rule = ruleForWords(withoutLanguage(withoutDigits));
+            }
+        }
+        return rule;
+    }
+
+    private static Rule ruleForWords(final List<String> words) {
         if (words.isEmpty()) {
             return null;
         }
         String last = words.get(words.size() - 1);
         String pair = words.size() > 1 ? words.get(words.size() - 2) + " " + last : null;
         String joined = String.join("", words);
-        // номер на конце поля (EXPIRY1, PHONE2) не меняет его смысл; cvv2 и pan2 есть в словаре и так
-        String lastBase = withoutTrailingDigits(last);
         Rule rule = null;
-        if (words.stream().anyMatch(HIDE_ANYWHERE::contains) || HIDE_LAST.contains(last) || HIDE_LAST.contains(lastBase)
-            || HIDE_LAST.contains(joined) || (pair != null && HIDE_LAST_PAIR.contains(pair))) {
+        if (words.stream().anyMatch(HIDE_ANYWHERE::contains) || HIDE_LAST.contains(last)
+            || HIDE_LAST.contains(joined) || (pair != null && HIDE_LAST_PAIR.contains(pair)) || documentDetail(words, last)) {
             rule = Rule.HIDE;
         } else if (PAN_LAST.contains(last) || PAN_LAST.contains(joined)
             || (pair != null && PAN_LAST_PAIR.contains(pair))) {
             rule = Rule.PAN;
-        } else if (TAIL_LAST.contains(last) || TAIL_LAST.contains(lastBase) || TAIL_LAST.contains(joined)
+        } else if (TAIL_LAST.contains(last) || TAIL_LAST.contains(joined)
             || (pair != null && TAIL_LAST_PAIR.contains(pair)) || words.stream().anyMatch(TAIL_ANYWHERE::contains)) {
             rule = Rule.TAIL;
         } else if (NAME_LAST.contains(last) || NAME_LAST.contains(joined)
             || ("name".equals(last) && words.size() > 1 && NAME_QUALIFIERS.contains(words.get(words.size() - 2)))) {
             rule = Rule.NAME;
-        } else if ("email".equals(last) || "mail".equals(last) || words.contains("email")) {
+        } else if ("email".equals(last) || "mail".equals(last) || "mails".equals(last) || words.contains("email")
+            || joined.endsWith("email") || joined.endsWith("emails")) {
             rule = Rule.EMAIL;
         } else if (URL_LAST.contains(last)) {
             rule = Rule.URL;
@@ -249,6 +291,28 @@ public final class MaskingRules {
             rule = Rule.CODE;
         }
         return rule;
+    }
+
+    /** Поле документа: серия, номер, место и дата выдачи (documentSeria, docIssueDate, docGivePlace). */
+    private static boolean documentDetail(final List<String> words, final String last) {
+        return words.size() > 1 && words.stream().anyMatch(DOC_WORDS::contains)
+            && (DOC_DETAIL_LAST.contains(last) || words.stream().anyMatch(DOC_DETAIL_ANYWHERE::contains));
+    }
+
+    private static List<String> withoutLanguage(final List<String> words) {
+        int end = words.size();
+        while (end > 1 && LANGUAGE_SUFFIXES.contains(words.get(end - 1))) {
+            end--;
+        }
+        return end == words.size() ? words : words.subList(0, end);
+    }
+
+    private static List<String> withoutTrailingDigits(final List<String> words) {
+        List<String> result = new ArrayList<>(words.size());
+        for (String word : words) {
+            result.add(withoutTrailingDigits(word));
+        }
+        return result;
     }
 
     private static String withoutTrailingDigits(final String word) {

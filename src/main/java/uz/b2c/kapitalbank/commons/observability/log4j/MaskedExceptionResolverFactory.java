@@ -56,14 +56,15 @@ public final class MaskedExceptionResolverFactory implements EventResolverFactor
         }
         if ("message".equals(field)) {
             return new Resolver() {
+                /** Исключение без сообщения — поля нет: в выводе не бывает {@code null} (контракт формата). */
+                @Override
+                public boolean isResolvable(final LogEvent event) {
+                    return event.getThrown() != null && event.getThrown().getMessage() != null;
+                }
+
                 @Override
                 void write(final Throwable thrown, final JsonWriter writer) {
-                    String message = thrown.getMessage();
-                    if (message == null) {
-                        writer.writeNull();
-                    } else {
-                        writer.writeString(LogTextMasker.maskOrPlaceholder(message));
-                    }
+                    writer.writeString(LogTextMasker.maskOrPlaceholder(thrown.getMessage()));
                 }
             };
         }
