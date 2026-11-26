@@ -34,7 +34,9 @@
                                 recyclerFactory="queue:capacity=16">
                 <EventTemplateAdditionalField key="service.name" value="${service.name}"/>
                 <EventTemplateAdditionalField key="service.version" value="${env:SERVICE_VERSION:-unknown}"/>
-                <EventTemplateAdditionalField key="deployment.environment" value="${env:DEPLOYMENT_ENVIRONMENT:-unknown}"/>
+                <EventTemplateAdditionalField key="deployment.environment.name" value="${env:DEPLOYMENT_ENVIRONMENT:-unknown}"/>
+                <EventTemplateAdditionalField key="telemetry.distro.name" value="${libobservability:name}"/>
+                <EventTemplateAdditionalField key="telemetry.distro.version" value="${libobservability:version}"/>
             </JsonTemplateLayout>
         </Console>
 

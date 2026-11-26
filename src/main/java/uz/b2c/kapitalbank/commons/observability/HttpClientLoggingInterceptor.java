@@ -22,6 +22,10 @@ import java.util.concurrent.TimeUnit;
  */
 public class HttpClientLoggingInterceptor implements ClientHttpRequestInterceptor, Ordered {
 
+    private static final int CLIENT_ERROR = 400;
+    private static final int HTTP_PORT = 80;
+    private static final int HTTPS_PORT = 443;
+
     static final String LOGGER_NAME = "observability.http.out";
 
     private final HttpLogSettings settings;
@@ -83,6 +87,16 @@ public class HttpClientLoggingInterceptor implements ClientHttpRequestIntercepto
         return result;
     }
 
+    /** Порт сервера: явный из URL или по умолчанию для схемы, как требует OpenTelemetry для server.port. */
+    private static Integer serverPort(final URI uri) {
+        if (uri.getPort() >= 0) {
+            return uri.getPort();
+        }
+        String scheme = uri.getScheme();
+        return "https".equalsIgnoreCase(scheme) ? Integer.valueOf(HTTPS_PORT)
+            : "http".equalsIgnoreCase(scheme) ? Integer.valueOf(HTTP_PORT) : null;
+    }
+
     private record CapturedResponse(BodyCapture capture, String contentType) {
     }
 
@@ -112,23 +126,30 @@ public class HttpClientLoggingInterceptor implements ClientHttpRequestIntercepto
         String summary = "HTTP out " + request.getMethod() + " " + target + " -> " + outcome + " in " + durationMs + " ms";
         HttpHeaders headers = request.getHeaders();
 
+        // имена полей — OpenTelemetry semantic conventions (HTTP client); свои поля — под префиксом uz.kapitalbank.
         HttpLogMessage message = new HttpLogMessage(summary)
-            .field("http.direction", "out")
             .field("http.request.method", request.getMethod())
             .field("url.full", target)
+            .field("server.address", uri.getHost())
+            .field("server.port", serverPort(uri))
             .field("http.response.status_code", status)
-            .field("event.duration_ms", durationMs)
-            .field("http.request.headers", settings.renderHeaders(headers.keySet(), headers::getFirst))
-            .field("error.type", failure == null ? null : failure.getClass().getName());
+            .field(HttpLogFields.DURATION_MS, durationMs)
+            // error.type по OpenTelemetry: класс исключения, а без него у 4xx и 5xx — код статуса строкой
+            .field("error.type", failure != null ? failure.getClass().getName()
+                : status != null && status >= CLIENT_ERROR ? String.valueOf(status) : null);
+        settings.addRequestHeaders(message, headers.keySet(), headers::get);
 
         if (bodies) {
-            message.field("http.request.body.bytes", body == null ? 0 : body.length)
+            message.field("http.request.body.size", body == null ? 0 : body.length)
                 .field("http.request.body.content",
                     settings.renderBody(body, headers.getFirst(HttpHeaders.CONTENT_TYPE)));
             if (response != null) {
+                String responseBody = settings.renderBody(response.capture(), response.contentType());
                 // сколько прочитало приложение; остаток, который HTTP-клиент дочитывает при закрытии, не учитывается
-                message.field("http.response.body.bytes", response.capture().total())
-                    .field("http.response.body.content", settings.renderBody(response.capture(), response.contentType()));
+                message.field("http.response.body.size", response.capture().total())
+                    .field("http.response.body.content", responseBody)
+                    .field(HttpLogFields.ERROR_CODE,
+                        status != null && status >= CLIENT_ERROR ? HttpLogSettings.errorCode(responseBody) : null);
             }
         }
         return message;

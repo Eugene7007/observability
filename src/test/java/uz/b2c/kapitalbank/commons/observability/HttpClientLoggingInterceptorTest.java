@@ -61,8 +61,11 @@ class HttpClientLoggingInterceptorTest {
         assertThat(message.get("http.response.body.content"))
             .contains("\"pan\":\"860051******8413\"")
             .contains("\"fullName\":\"I***\"");
-        assertThat(message.get("http.request.headers")).contains("Content-Type=application/json")
-            .doesNotContain("Authorization").doesNotContain("Basic");
+        assertThat(message.get("http.request.header.content-type")).isEqualTo("[application/json]");
+        assertThat(message.getData().keySet()).noneMatch(key -> key.contains("authorization"));
+        assertThat(message.getData().toString()).doesNotContain("Basic");
+        assertThat(message.get("server.address")).isEqualTo("sv-gate");
+        assertThat(message.get("server.port")).isEqualTo("8080");
         assertThat(message.get("url.full")).doesNotContain("x=1");
     }
 

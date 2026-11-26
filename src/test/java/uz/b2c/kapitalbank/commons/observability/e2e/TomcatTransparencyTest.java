@@ -301,7 +301,7 @@ class TomcatTransparencyTest {
         TimeUnit.MILLISECONDS.sleep(300);
         String log = LOG.toString(StandardCharsets.UTF_8);
         for (Case c : cases) {
-            String line = log.lines().filter(l -> l.contains("\"http.direction\":\"in\"")
+            String line = log.lines().filter(l -> l.contains("\"logger\":\"observability.http.in\"")
                     && l.contains(c.method() + " " + c.path() + " ->"))
                 .reduce((a, b) -> b).orElse("");
             if (c.contentType().contains("json")) {
@@ -311,11 +311,11 @@ class TomcatTransparencyTest {
                 assertThat(line).as("log line for %s", c).contains("\"http.request.body.content\":")
                     .contains("860012******1233").contains("cvv\\\":\\\"***");
             }
-            assertThat(line).contains("\"http.request.body.bytes\":" + body.length);
+            assertThat(line).contains("\"http.request.body.size\":" + body.length);
             // тело ответа: своё у приложения, страница ошибки Spring Boot — у sendError и исключений
             assertThat(line).as("response body for %s", c).contains("\"http.response.body.content\":");
             // MDC запроса есть и в записи, отложенной до страницы ошибки
-            assertThat(line).contains("\"correlation_id\":");
+            assertThat(line).contains("\"uz.kapitalbank.correlation_id\":");
         }
         assertThat(log).doesNotContain(PAN);
         // страница ошибки не даёт отдельной записи

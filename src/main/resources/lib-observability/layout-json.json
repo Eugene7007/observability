@@ -14,7 +14,7 @@
     "$resolver": "logger",
     "field": "name"
   },
-  "thread": {
+  "thread.name": {
     "$resolver": "thread",
     "field": "name"
   },
@@ -29,34 +29,34 @@
     "$resolver": "mdc",
     "key": "spanId"
   },
-  "correlation_id": {
+  "uz.kapitalbank.correlation_id": {
     "$resolver": "mdc",
     "key": "correlationId"
   },
-  "client_device_id": {
+  "uz.kapitalbank.client_device_id": {
     "$resolver": "mdc",
     "key": "clientDeviceId"
   },
-  "user_guid": {
+  "user.id": {
     "$resolver": "mdc",
     "key": "userGuid"
   },
-  "device_id": {
+  "device.id": {
     "$resolver": "mdc",
     "key": "deviceId"
   },
   "httpFields": {
     "$resolver": "maskedMap"
   },
-  "error.type": {
+  "exception.type": {
     "$resolver": "maskedException",
     "field": "className"
   },
-  "error.message": {
+  "exception.message": {
     "$resolver": "maskedException",
     "field": "message"
   },
-  "error.stack_trace": {
+  "exception.stacktrace": {
     "$resolver": "maskedException",
     "field": "stackTrace",
     "truncationPoints": [
