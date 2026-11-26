@@ -69,17 +69,17 @@ implementation 'uz.b2c.kapitalbank.commons:observability-starter:<версия>'
 | Что | Примеры имён | Как |
 | --- | --- | --- |
 | Номер карты | `pan`, `cardNumber`, `card_number`, `senderCardNumber`, `cardNo`, `CREF_NO`, `hpan`, `processingKey`, `recipientProcessingKey`, `primaryAccountNumber` | первые 6 и последние 4 цифры |
-| Телефон, счёт | `phone`, `phoneNumber`, `mobilePhone`, `mobile`, `mobileNumber`, `tel`, `msisdn`, `account`, `accountNumber`, `accNo`, `CARD_ACCT`, `iban` | последние 4 |
-| ФИО | `firstName`, `firstname`, `lastName`, `middlename`, `fullName`, `holderName`, `cardHolder`, `EMBOS_NAME`, `embossedName`, `nameOnCard`, `beneficiaryName`, `payerName`, `surname`, `F_NAMES`, `ABVR_NAME`, `CARD_NAME`, `cardName`; `name` внутри объектов `client`, `card`, `holder`, `customer`, `recipient` и т. п. | первая буква |
-| Почта | `email` | первая буква и домен: `i***@mail.uz` |
-| Секреты и документы | всё, где есть `cvv`, `cvc`, `pin`, `pinfl`, `pnfl`, `jshshir`, `stir`, `otp`, `password`, `secret`, `token`, `passport`, `address`, `track1`, `track2`, `pinBlock`, `pvv`, `cavv`, `icvv`; `birthDate`, `dateOfBirth`, `birthday`, `dob`, `expiry`, `expirationDate`, `expireDate`, `expMonth`, `expYear`, `validTo`, `validThru`, `documentNumber`, `docSeries`, `seriesNumber`, `nationalId`, `personalNumber`, `inn`, `tin`, `codeWord`, `smsCode`, `cardSecurityCode`; поля процессинга `PERSON_CODE`, `R_PCODE`, `B_DATE`, `R_STREET`, `ID_CARD`, `SERIAL_NO`, `EXPIRY1` | целиком |
-| Коды подтверждения | `verificationCode`, `confirmCode`, `securityCode` и т. п. | 4–8 цифр скрываются в любом виде: строкой, числом, в тексте |
+| Телефон, счёт | `phone`, `phoneNumber`, `mobilePhone`, `mobile`, `mobileNumber`, `tel`, `msisdn`, `telefon`, `account`, `accountNumber`, `accNo`, `CARD_ACCT`, `iban` | последние 4 |
+| ФИО | `firstName`, `firstname`, `lastName`, `middlename`, `fullName`, `holderName`, `cardHolder`, `EMBOS_NAME`, `embossedName`, `nameOnCard`, `beneficiaryName`, `payerName`, `surname`, `patronym`, `secondName`, `F_NAMES`, `M_NAME`, `ABVR_NAME`, `CARD_NAME`, `cardName`; `name` внутри объектов `client`, `card`, `holder`, `customer`, `recipient` и т. п. | первая буква |
+| Почта | `email`, `E_MAILS` | первая буква и домен: `i***@mail.uz` |
+| Секреты и документы | всё, где есть `cvv`, `cvc`, `pin`, `pinfl`, `pnfl`, `jshshir`, `stir`, `otp`, `password`, `secret`, `token`, `passport`, `address`, `track1`, `track2`, `pinBlock`, `pvv`, `cavv`, `icvv`; `birthDate`, `dateOfBirth`, `birthday`, `dob`, `expiry`, `expirationDate`, `expireDate`, `expMonth`, `expYear`, `validTo`, `validThru`, `documentNumber`, `docSeries`, `documentSeria`, `docIssueDate`, `docGivePlace`, `seriesNumber`, `nationalId`, `personalNumber`, `birthPlace`, `inn`, `tin`, `taxPayerCode`, `codeWord`, `smsCode`, `accessKey`, `salt`; код безопасности карты под любым именем: `cardSecurityCode`, `securityCode`, `secureCode`, `csc`, `cvn`; поля процессинга `PERSON_CODE`, `R_PCODE`, `B_DATE`, `R_STREET`, `ID_CARD`, `SERIAL_NO` | целиком |
+| Коды подтверждения | `verificationCode`, `confirmCode`, `activationCode` и т. п. | 4–8 цифр скрываются в любом виде: строкой, числом, в тексте |
 | Поле `code` | `code` | строка из цифр скрывается (OTP); число и текст остаются: это коды ошибок, `"CARD_EXPIRED"` |
 | Адреса | `url`, `uri`, `link` | остаются схема, хост и путь; query скрывается, в пути маскируются длинные числа и карты |
 
 Независимо от имён в любом тексте маскируются номера карт (13–19 цифр, в том числе группами через пробел, дефис или скобки, с проверкой Луна), мобильные номера `998XXXXXXXXX` и `+998 (XX) XXX-XX-XX` и `Bearer <токен>`. Поля команды только добавляются к базе: если имя распознала база, применяется её правило, и ослабить его команда не может.
 
-Номер на конце имени поля не меняет правило: `EXPIRY1` маскируется как `EXPIRY`, `PHONE2` — как `PHONE`. Имена полей процессингов Tieto и Humo входят в базовый словарь, их проверяет корпус `PiiLeakCorpusTest` на SOAP-ответе процессинга. SOAP-конверты обычно больше 4 КБ, поэтому адаптерам процессинга стоит поднять `LIB_OBSERVABILITY_HTTP_LOG_MAX_BODY_BYTES`, например до 16384.
+Номер на конце любого слова имени и суффикс языка или алфавита не меняют правило: `EXPIRY1` и `EXP_DATE1` маскируются как срок карты, `address2` — как адрес, `firstNameLatin`, `surnameCyr`, `lastNameEn` — как имя. Заголовок `Authorization` и поля вида `authorizationHeader` скрываются, а деловые `authorizationCode` и `authorizationDateTime` — нет. `SERIAL_NO` и `R_PCODE` процессинга скрываются только под этими точными именами, поэтому `terminalSerialNo` и `PCODE` (processing code ISO 8583) остаются. Имена полей процессингов Tieto и Humo входят в базовый словарь, их проверяет корпус `PiiLeakCorpusTest` на SOAP-ответе процессинга. SOAP-конверты обычно больше 4 КБ, поэтому адаптерам процессинга стоит поднять `LIB_OBSERVABILITY_HTTP_LOG_MAX_BODY_BYTES`, например до 16384.
 
 ```yaml
 lib:
@@ -117,13 +117,16 @@ lib:
 
 Каждая запись — один JSON-объект на строку в stdout. На этот формат опираются сбор логов (Vector), хранилище, дашборды и алерты, поэтому он зафиксирован как контракт. Внутри 1.x формат меняется только добавлением полей. Переименование, удаление поля или смена его типа возможны только в новой мажорной версии и с предупреждением DevOps заранее.
 
-Контракт проверяет тест `e2e/LogFormatContractTest`: он пишет через настоящий log4j2 библиотеки по записи каждого вида и сверяет имена и типы полей с эталоном `src/test/resources/log-format-contract.json`. Пропавшее или переименованное поле, сменившийся тип и новое поле роняют сборку. Чтобы добавить поле, его вносят в эталон и в таблицы ниже в том же изменении.
+Контракт проверяют тесты `e2e/LogFormatContractTest` (режим STDOUT) и `e2e/LogFormatContractKafkaTest` (STDOUT_AND_KAFKA, как в 1.x на проде): stdout-запись описана в обеих конфигурациях, и проверяется каждая. Через настоящий log4j2 библиотеки пишется по записи каждого вида: обычная, с исключением, MapMessage приложения, входящий и исходящий HTTP, в том числе упавшие. Имена и типы полей сверяются с эталоном `src/test/resources/log-format-contract.json`, а значения — с правилами ниже: время в UTC, уровни, отсутствие `null` и дубликатов ключей. Пропавшее или переименованное поле, сменившийся тип, новое поле или вид записи роняют сборку. Чтобы добавить поле, его вносят в эталон и в таблицы ниже в том же изменении.
 
 Общие правила:
-- Поле без значения не пишется вовсе, `null` в выводе не бывает. Например, `user_guid` есть только в запросах после авторизации.
+- Поле без значения не пишется вовсе, `null` в выводе не бывает. Например, `user_guid` есть только в запросах после авторизации, `error.message` — только у исключения с сообщением.
+- Порядок полей в записи не входит в контракт: разбирайте по именам.
 - `@timestamp` — UTC, ISO-8601 с миллисекундами: `2026-11-25T12:00:00.123Z`.
 - `level` — `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`. HTTP-записи: успех — `INFO`, 4xx — `WARN`, 5xx и исключение — `ERROR`.
 - Все текстовые значения уже замаскированы (раздел «Маскирование ПДн»).
+- Тела обрезает сама библиотека до `max-body-bytes` с меткой `...[truncated]`, сообщения и стеки — до 32 КБ. Предел строки log4j2 (131072 символа) выше и срабатывает только как страховка.
+- Поля `MapMessage`, которые пишет само приложение, выводятся с префиксом `data.` (`data.orderId`) и всегда строкой.
 - Формат для прежнего Kafka-топика (`layout-legacy-kafka.json`) временный, уходит в 2.0 и под контракт не подпадает.
 
 ### Поля каждой записи
@@ -167,13 +170,13 @@ lib:
 | `http.response.status_code` | number | in, out | Статус; при исключении — 500 (in) или нет поля (out) |
 | `event.duration_ms` | number | in, out | Длительность обмена, мс |
 | `http.request.headers` | string | in, out | Разрешённые заголовки: `Имя=значение; Имя=значение` |
-| `http.request.body.bytes` | number | in, out | Полный размер тела запроса |
+| `http.request.body.bytes` | number | in, out | Полный размер тела запроса; у входящего с пустым телом поля нет, у исходящего — 0 |
 | `http.request.body.content` | string | in, out | Тело запроса, замаскированное и обрезанное до `max-body-bytes` |
 | `http.response.body.bytes` | number | in, out | Размер тела ответа |
 | `http.response.body.content` | string | in, out | Тело ответа, замаскированное и обрезанное |
-| `error.type` | string | in, out | Класс исключения, если обмен упал |
+| `error.type` | string | in, out | Класс исключения, если обмен упал; у упавшего исходящего вызова нет статуса и полей ответа |
 
-Поля тел есть только у 4xx, 5xx и исключений, а у успешных обменов — при `LIB_OBSERVABILITY_HTTP_LOG_BODIES=ALWAYS`.
+Поля тел есть только у 4xx, 5xx и исключений, а у успешных обменов — при `LIB_OBSERVABILITY_HTTP_LOG_BODIES=ALWAYS` и пути из `LIB_OBSERVABILITY_HTTP_LOG_BODY_PATHS`.
 
 Пример записи:
 
@@ -235,7 +238,7 @@ lib:
 `./gradlew build` запускает модульные тесты и отдельной задачей `e2eTest` — сквозные запуски Spring Boot, каждый в своей JVM:
 - логи в режиме Kafka с недоступным брокером;
 - actuator, Prometheus с тегом `application`, `traceId` и `userGuid` в логах;
-- `LogFormatContractTest` — контракт формата логов: имена и типы полей каждой записи сверяются с эталоном `log-format-contract.json`;
+- `LogFormatContractTest` и `LogFormatContractKafkaTest` — контракт формата логов в обеих конфигурациях вывода: имена и типы полей каждой записи сверяются с эталоном `log-format-contract.json`, проверяются время, уровни, отсутствие `null` и дубликатов;
 - `TomcatTransparencyTest` — настоящий Tomcat: приложение получает тело байт в байт (JSON, 1 МБ, chunked, `getReader` с кодировкой, форма, multipart), а у каждой ошибки (400, 404, 405, 415, 500, асинхронный 503, тело отдельным пакетом) в логе есть замаскированное тело.
 
 Защитные модульные тесты:
