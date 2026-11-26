@@ -137,7 +137,11 @@ lib:
 - тела запросов и ответов (`http.*.body.content`, в стандарте opt-in) пишутся у 4xx, 5xx и исключений всегда: без них не разобрать инцидент; маскирование ПДн при этом не отключается;
 - в query (`url.full`, `url.query`) скрываются значения всех параметров, а не только известных чувствительных: ПДн в запросах банка бывают в любом параметре;
 - стек в `exception.stacktrace` обрезается на входе в сервлет и до 32 КБ;
-- `telemetry.distro.*` в стандарте описывает дистрибутив OpenTelemetry; здесь — библиотеку, которой сделана запись, ближайший по смыслу атрибут.
+- при исключении `http.response.status_code` = 500, даже если ответ успел уйти с другим кодом: библиотека видит исключение, а не то, что дошло до клиента;
+- у `HEAD` тело ответа, которое записало приложение, попадает в `http.response.body.content`, хотя по сети его нет;
+- `client.address` берётся из `Forwarded` / `X-Forwarded-For`, а левое значение этих заголовков задаёт сам клиент: для расследований доверять ему нельзя, адрес соединения через прокси — это адрес прокси.
+
+Часть атрибутов в реестре OpenTelemetry ещё в статусе Development, и стандарт может их переименовать: `thread.name`, `user.id`, `http.request.body.size`, `http.response.body.size`, `http.request.body.content`, `http.response.body.content`. Если это случится, новое имя добавляется в минорной версии рядом со старым, старое убирается в мажорной.
 
 ### Поля каждой записи
 
@@ -150,11 +154,11 @@ lib:
 | `trace_id` | string | Идентификатор трассы W3C | модель записи OTel (TraceId) |
 | `span_id` | string | Идентификатор спана | модель записи OTel (SpanId) |
 | `thread.name` | string | Поток | semconv `thread` |
-| `service.name` | string | `spring.application.name` | semconv `service` |
+| `service.name` | string | `spring.application.name`, иначе `unknown_service:java`, как требует OpenTelemetry | semconv `service` |
 | `service.version` | string | Переменная `SERVICE_VERSION`, иначе `unknown` | semconv `service` |
 | `deployment.environment.name` | string | Переменная `DEPLOYMENT_ENVIRONMENT`, иначе `unknown` | semconv `deployment` |
-| `telemetry.distro.name` | string | `observability-starter` — какой библиотекой сделана запись | semconv `telemetry` |
-| `telemetry.distro.version` | string | Версия библиотеки | semconv `telemetry` |
+| `uz.kapitalbank.log_library.name` | string | `observability-starter` — какой библиотекой сделана запись | своё: `telemetry.distro.*` в OTel — дистрибутив OpenTelemetry (агент), с подключением OTel agent поле получило бы два смысла |
+| `uz.kapitalbank.log_library.version` | string | Версия библиотеки | своё, см. выше |
 | `user.id` | string | Пользователь, из заголовка `UserGuid` | semconv `user` |
 | `uz.kapitalbank.device_id` | string | Устройство клиента, из заголовка `DeviceId` | своё: `device.id` в OTel — устройство, на котором работает сам сервис |
 | `uz.kapitalbank.correlation_id` | string | Сквозной идентификатор запроса (совместимость со старыми сервисами) | своё, в OTel нет |
@@ -175,19 +179,19 @@ lib:
 | Поле | Тип | Где | Что содержит | Источник имени |
 | --- | --- | --- | --- | --- |
 | `http.request.method` | string | in, out | Метод | semconv `http` |
-| `http.request.method_original` | string | in, out | Исходный метод, если он не из стандартного списка (тогда `http.request.method` = `_OTHER`) | semconv `http` |
-| `url.scheme` | string | in | Схема глазами клиента: из `X-Forwarded-Proto` / `Forwarded`, иначе из запроса | semconv `url` |
-| `url.path` | string | in | Путь без query, номер карты в пути замаскирован | semconv `url` |
-| `url.query` | string | in | Query с ключами, значения скрыты: `lang=REDACTED` | semconv `url` |
-| `http.route` | string | in | Шаблон маршрута Spring MVC, например `/api/v1/cards/{id}` | semconv `http` |
+| `http.request.method_original` | string | in, out | Исходный метод, если он не из стандартного списка (тогда `http.request.method` = `_OTHER`); замаскирован | semconv `http` |
+| `url.scheme` | string | in | Схема глазами клиента: `Forwarded`, `X-Forwarded-Proto`, иначе схема соединения; только `http` или `https` | semconv `url` |
+| `url.path` | string | in | Путь из URI вместе с context-path, без query, номер карты в пути замаскирован | semconv `url` |
+| `url.query` | string | in | Query с ключами, значения скрыты: `lang=REDACTED`; ключи маскируются, в том числе закодированные (`%20`) | semconv `url` |
+| `http.route` | string | in | Шаблон маршрута Spring MVC с context-path, например `/api/v1/cards/{id}`; маршрут обработчика, а не страницы ошибки; у 404 без обработчика поля нет | semconv `http` |
 | `url.full` | string | out | Схема, хост, порт, путь и query со скрытыми значениями, без учётных данных | semconv `url` |
-| `server.address` | string | in, out | in — хост, к которому обратился клиент (`X-Forwarded-Host` или запрос); out — хост вызываемого сервиса, по нему строятся ошибки и задержки по партнёрам | semconv `server` |
+| `server.address` | string | in, out | in — хост, к которому обратился клиент (`Forwarded`, `X-Forwarded-Host`, `Host`); out — хост вызываемого сервиса, по нему строятся ошибки и задержки по партнёрам. IPv6 без скобок, значение замаскировано | semconv `server` |
 | `server.port` | number | in, out | Порт; если явно не задан — по схеме (80, 443) | semconv `server` |
-| `client.address` | string | in | Адрес клиента: первый из `X-Forwarded-For` / `Forwarded`, иначе адрес соединения | semconv `client` |
+| `client.address` | string | in | Адрес клиента: первый из `Forwarded` / `X-Forwarded-For` (кроме `unknown` и скрытых `_…`), иначе адрес соединения; замаскирован | semconv `client` |
 | `network.protocol.version` | string | in | Версия HTTP: `1.1`, `2` | semconv `network` |
 | `user_agent.original` | string | in | Заголовок `User-Agent`, замаскированный; в `http.request.header.*` не дублируется | semconv `user_agent` |
 | `http.response.status_code` | number | in, out | Статус; при исключении — 500 (in) или нет поля (out) | semconv `http` |
-| `error.type` | string | in, out | Класс исключения, если обмен упал; иначе код статуса строкой: у входящих для 5xx, у исходящих для 4xx и 5xx | semconv `error` |
+| `error.type` | string | in, out | Класс исключения, если обмен упал (исключение обработчика, а не обёртка `ServletException`); иначе код статуса строкой: у входящих для 5xx, у исходящих для 4xx и 5xx | semconv `error` |
 | `http.request.header.<имя>` | array | in, out | Разрешённый заголовок, имя в нижнем регистре, значения массивом строк | semconv `http` |
 | `http.request.body.size` | number | in, out | Размер тела по сети: Content-Length входящего запроса; у исходящего — отправленные байты | semconv `http` |
 | `http.request.body.content` | string | in, out | Тело запроса, замаскированное и обрезанное до `max-body-bytes` | semconv `http` |
@@ -203,7 +207,7 @@ lib:
 Пример записи:
 
 ```json
-{"@timestamp":"2026-11-25T12:00:00.123Z","level":"ERROR","otel.scope.name":"observability.http.out","thread.name":"http-nio-8080-exec-1","message":"HTTP out POST https://humo.internal/api/pay -> 502 in 37 ms","service.name":"p2p-service","service.version":"1.4.2","deployment.environment.name":"prod","telemetry.distro.name":"observability-starter","telemetry.distro.version":"1.0.0-rc4","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7","user.id":"5d1c…","uz.kapitalbank.correlation_id":"c0ffee00-0000-4000-8000-000000000001","http.request.method":"POST","url.full":"https://humo.internal/api/pay?lang=REDACTED","server.address":"humo.internal","server.port":443,"http.response.status_code":502,"error.type":"502","uz.kapitalbank.duration_ms":37,"http.request.header.content-type":["application/json"],"http.request.body.size":14,"http.request.body.content":"{\"amount\":100}","http.response.body.size":29,"http.response.body.content":"{\"error\":{\"code\":\"DECLINED\"}}","uz.kapitalbank.http.response.body.app_size":29,"uz.kapitalbank.error.code":"DECLINED"}
+{"@timestamp":"2026-11-25T12:00:00.123Z","level":"ERROR","otel.scope.name":"observability.http.out","thread.name":"http-nio-8080-exec-1","message":"HTTP out POST https://humo.internal/api/pay -> 502 in 37 ms","service.name":"p2p-service","service.version":"1.4.2","deployment.environment.name":"prod","uz.kapitalbank.log_library.name":"observability-starter","uz.kapitalbank.log_library.version":"1.0.0-rc5","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7","user.id":"5d1c…","uz.kapitalbank.correlation_id":"c0ffee00-0000-4000-8000-000000000001","http.request.method":"POST","url.full":"https://humo.internal/api/pay?lang=REDACTED","server.address":"humo.internal","server.port":443,"http.response.status_code":502,"error.type":"502","uz.kapitalbank.duration_ms":37,"http.request.header.content-type":["application/json"],"http.request.body.size":14,"http.request.body.content":"{\"amount\":100}","http.response.body.size":29,"http.response.body.content":"{\"error\":{\"code\":\"DECLINED\"}}","uz.kapitalbank.http.response.body.app_size":29,"uz.kapitalbank.error.code":"DECLINED"}
 ```
 
 ## Kafka
@@ -256,6 +260,18 @@ lib:
 | `MANAGEMENT_ENDPOINT_IDS`, `ENABLE_SWAGGER`, `SWAGGER_BASE_URL` | как раньше | Те же переменные, что у старой библиотеки |
 
 ## Изменения версий
+
+**1.0.0-rc5.** Находки ревью rc4 на настоящем Tomcat. Формат Kafka-топика прежний; эталон Kafka расширен (исходящий 4xx, нестандартный метод, пустое тело, маскирование заголовков, обрезка стека) и снят с rc2.
+
+| rc4 | rc5 |
+| --- | --- |
+| `telemetry.distro.name`, `telemetry.distro.version` | `uz.kapitalbank.log_library.name`, `uz.kapitalbank.log_library.version` |
+| `http.route = "/error"` у записей, прошедших через страницу ошибки | маршрут обработчика; у 404 без обработчика поля нет (то же исправление — в Kafka-поле `http.route`) |
+| `url.path`, `http.route` без context-path | с context-path, как требует OpenTelemetry (`message` и Kafka — по-прежнему без него) |
+| `error.type = jakarta.servlet.ServletException` у исключений контроллера | тип исключения обработчика (Kafka — по-прежнему класс как есть) |
+| `service.name = unknown` без имени приложения | `unknown_service:java` |
+
+Новые значения из заголовков (`client.address`, `server.address`, `http.request.method_original`, ключи query, в том числе закодированные) маскируются; `url.scheme` принимает только `http` и `https`. Порядок источников для адреса — как в OpenTelemetry: сначала `Forwarded`, потом `X-Forwarded-*`, потом `Host`. Хост с подчёркиванием (`my_partner:8080`) в Kafka-поле `url.full` теперь пишется как есть, в rc2 был `http://null/…`.
 
 **1.0.0-rc4.** Доведено соответствие OpenTelemetry по ревью 2026-11-26; формат Kafka-топика — прежний (как в rc2) и закреплён тестом. Изменения stdout относительно rc3:
 

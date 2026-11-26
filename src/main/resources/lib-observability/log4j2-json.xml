@@ -23,11 +23,11 @@
         <Console name="stdout" target="SYSTEM_OUT">
             <JsonTemplateLayout eventTemplateUri="classpath:lib-observability/layout-json.json" maxStringLength="102400"
                                 recyclerFactory="queue:capacity=16">
-                <EventTemplateAdditionalField key="service.name" value="${service.name}"/>
+                <EventTemplateAdditionalField key="service.name" value="${spring:spring.application.name:-unknown_service:java}"/>
                 <EventTemplateAdditionalField key="service.version" value="${env:SERVICE_VERSION:-unknown}"/>
                 <EventTemplateAdditionalField key="deployment.environment.name" value="${env:DEPLOYMENT_ENVIRONMENT:-unknown}"/>
-                <EventTemplateAdditionalField key="telemetry.distro.name" value="${libobservability:name}"/>
-                <EventTemplateAdditionalField key="telemetry.distro.version" value="${libobservability:version}"/>
+                <EventTemplateAdditionalField key="uz.kapitalbank.log_library.name" value="${libobservability:name}"/>
+                <EventTemplateAdditionalField key="uz.kapitalbank.log_library.version" value="${libobservability:version}"/>
             </JsonTemplateLayout>
         </Console>
     </Appenders>

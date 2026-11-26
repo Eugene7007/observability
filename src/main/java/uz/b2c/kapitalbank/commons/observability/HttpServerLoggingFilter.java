@@ -40,6 +40,9 @@ public class HttpServerLoggingFilter extends OncePerRequestFilter {
 
     static final String LOGGER_NAME = "observability.http.in";
     private static final String PENDING = HttpServerLoggingFilter.class.getName() + ".PENDING";
+    /** Маршрут обработчика, снятый до прохода ERROR: страница ошибки перезаписывает его на /error. */
+    private static final String ROUTE = HttpServerLoggingFilter.class.getName() + ".ROUTE";
+    private static final String NO_ROUTE = "";
     private static final int CLIENT_ERROR = 400;
     private static final int SERVER_ERROR = 500;
 
@@ -89,6 +92,7 @@ public class HttpServerLoggingFilter extends OncePerRequestFilter {
                     new CompletionListener(request, response, capturedRequest, capturedResponse, start));
             } else {
                 capturedResponse.flushWriter();
+                rememberRoute(request);
                 if (awaitsErrorPage(request, response, capturedResponse, failure)) {
                     request.setAttribute(PENDING,
                         new Pending(request, response, capturedRequest, capturedResponse, failure, start));
@@ -97,6 +101,27 @@ public class HttpServerLoggingFilter extends OncePerRequestFilter {
                 }
             }
         }
+    }
+
+    /** Маршрут обработчика до прохода ERROR; у 404 и ошибок до выбора обработчика маршрута нет. */
+    private static void rememberRoute(final HttpServletRequest request) {
+        Object route = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
+        request.setAttribute(ROUTE, route != null ? route.toString() : NO_ROUTE);
+    }
+
+    private static String route(final HttpServletRequest request) {
+        Object remembered = request.getAttribute(ROUTE);
+        Object route = remembered != null ? remembered : request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
+        return route == null || NO_ROUTE.equals(route) ? null : route.toString();
+    }
+
+    /** error.type по OpenTelemetry: тип исключения обработчика, а не обёртка контейнера ServletException. */
+    static String errorType(final Throwable failure) {
+        Throwable cause = failure;
+        while (cause instanceof ServletException && cause.getCause() != null && cause.getCause() != cause) {
+            cause = cause.getCause();
+        }
+        return cause.getClass().getName();
     }
 
     private void finish(final HttpServletRequest request, final HttpServletResponse response,
@@ -294,20 +319,25 @@ public class HttpServerLoggingFilter extends OncePerRequestFilter {
         String outcome = failure != null ? "FAILED (" + failure.getClass().getSimpleName() + ")" : String.valueOf(status);
         // в пути бывает номер карты (например, recipient-info/{processingKey}), поэтому путь маскируется
         String path = LogTextMasker.maskPath(pathWithinApplication(request));
-        Object route = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
+        String route = route(request);
+        // по OpenTelemetry url.path — путь из URI, а http.route включает корень приложения (context-path)
+        String contextPath = request.getContextPath() == null ? "" : request.getContextPath();
+        String fullPath = contextPath.isEmpty() ? path : LogTextMasker.maskPath(request.getRequestURI());
+        String fullRoute = route == null || contextPath.isEmpty() ? route : contextPath + route;
         String summary = "HTTP in " + request.getMethod() + " " + path + " -> " + outcome + " in " + durationMs + " ms";
 
         // имена полей — OpenTelemetry semantic conventions (HTTP server); свои поля — под префиксом uz.kapitalbank.
         String method = request.getMethod();
-        String errorType = failure != null ? failure.getClass().getName()
+        String errorType = failure != null ? errorType(failure)
             : status >= SERVER_ERROR ? String.valueOf(status) : null;
         HttpLogMessage message = new HttpLogMessage(summary)
             .field("http.request.method", HttpLogSettings.otelMethod(method))
-            .field("http.request.method_original", HttpLogSettings.knownMethod(method) ? null : method)
+            .field("http.request.method_original",
+                HttpLogSettings.knownMethod(method) ? null : LogTextMasker.maskOrPlaceholder(method))
             .field("url.scheme", Forwarded.scheme(request))
-            .field("url.path", path)
+            .field("url.path", fullPath)
             .field("url.query", HttpLogSettings.redactQuery(request.getQueryString()))
-            .field("http.route", route)
+            .field("http.route", fullRoute)
             .field("server.address", Forwarded.host(request))
             .field("server.port", Forwarded.port(request))
             .field("client.address", Forwarded.client(request))

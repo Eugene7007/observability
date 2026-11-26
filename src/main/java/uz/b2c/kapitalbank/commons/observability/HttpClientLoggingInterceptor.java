@@ -168,15 +168,17 @@ public class HttpClientLoggingInterceptor implements ClientHttpRequestIntercepto
         // имена полей — OpenTelemetry semantic conventions (HTTP client); свои поля — под префиксом uz.kapitalbank.
         HttpLogMessage message = new HttpLogMessage(summary)
             .field("http.request.method", HttpLogSettings.otelMethod(method))
-            .field("http.request.method_original", HttpLogSettings.knownMethod(method) ? null : method)
+            .field("http.request.method_original",
+                HttpLogSettings.knownMethod(method) ? null : LogTextMasker.maskOrPlaceholder(method))
             // url.full по OpenTelemetry: query с ключами, значения скрыты (REDACTED)
             .field("url.full", query == null ? target : target + "?" + query)
-            .field("server.address", host)
+            // IPv6 без скобок, как у входящих; хост проходит маскер текста лога
+            .field("server.address", host == null ? null : LogTextMasker.maskOrPlaceholder(Forwarded.stripPort(host)))
             .field("server.port", explicitPort >= 0 ? Integer.valueOf(explicitPort) : defaultPort(uri))
             .field("http.response.status_code", status)
             .field(HttpLogFields.DURATION_MS, durationMs)
             // error.type по OpenTelemetry: класс исключения, а без него у 4xx и 5xx — код статуса строкой
-            .field("error.type", failure != null ? failure.getClass().getName()
+            .field("error.type", failure != null ? HttpServerLoggingFilter.errorType(failure)
                 : status != null && status >= CLIENT_ERROR ? String.valueOf(status) : null);
         settings.addRequestHeaders(message, headers.keySet(), headers::get);
         // прежний формат для Kafka-топика (rc1/rc2), порядок полей — как раньше

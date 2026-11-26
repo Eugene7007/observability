@@ -40,7 +40,8 @@ import org.springframework.web.servlet.HandlerMapping;
  * Формат прежнего Kafka-топика ({@code layout-legacy-kafka.json}) не меняется до 2.0: его читают старые потребители.
  * Записи всех видов рендерятся этим шаблоном и сравниваются с эталоном {@code log-format-legacy-kafka.json},
  * снятым с 1.0.0-rc2 — последней версии, где формат топика проверяли. Сравниваются записи целиком: имена, типы,
- * значения и порядок полей; меняются только время, длительность и стек.
+ * значения и порядок полей; меняются только время и длительность. Стек исключений задаётся явно, поэтому
+ * сравнивается целиком, вместе с точкой обрезки.
  * <p>
  * Эталон перезаписывается системным свойством {@code legacy.kafka.golden.write=<путь>} — только для снятия его
  * с версии, формат которой принят за прежний.
@@ -99,11 +100,6 @@ class LegacyKafkaFormatTest {
         if (node.has("message")) {
             node.put("message", node.get("message").asText().replaceAll("in \\d+ ms", "in N ms"));
         }
-        JsonNode thrown = node.get("thrown");
-        if (thrown != null && thrown.has("extendedStackTrace")) {
-            String stack = thrown.get("extendedStackTrace").asText();
-            ((ObjectNode) thrown).put("extendedStackTrace", stack.substring(0, Math.max(0, stack.indexOf('\n'))));
-        }
         return node;
     }
 
@@ -111,7 +107,7 @@ class LegacyKafkaFormatTest {
         Map<String, LogEvent> records = new LinkedHashMap<>();
         records.put("log", event("contract-app", Level.INFO, new SimpleMessage("contract-log"), null));
         records.put("error", event("contract-app", Level.ERROR, new SimpleMessage("contract-error"),
-            new IllegalStateException("card 8600123456781233")));
+            withStack(new IllegalStateException("card 8600123456781233"))));
         records.put("map", event("contract-map", Level.INFO,
             new StringMapMessage().with("orderId", "42").with("phone", "+998901234567"), null));
 
@@ -169,7 +165,43 @@ class LegacyKafkaFormatTest {
             // ожидаемо
         }
         records.put("http.out.failed", httpEvent("observability.http.out", refused));
+
+        // исходящий 4xx по https с нестандартным методом
+        HttpServerLoggingFilterTest.RecordingSink clientError = new HttpServerLoggingFilterTest.RecordingSink();
+        MockClientHttpRequest lookup = new MockClientHttpRequest(HttpMethod.valueOf("PROPFIND"),
+            URI.create("https://contract-out.internal:8443/api/v1/cards/8600123456781233?x=1"));
+        lookup.getHeaders().add("x-request-id", "r 8600123456781233");
+        MockClientHttpResponse notFound = new MockClientHttpResponse(
+            "{\"code\":\"NOT_FOUND\"}".getBytes(StandardCharsets.UTF_8), HttpStatus.NOT_FOUND);
+        notFound.getHeaders().add("Content-Type", "application/json");
+        ClientHttpResponse notFoundResponse = new HttpClientLoggingInterceptor(settings, clientError)
+            .intercept(lookup, new byte[0], (req, body) -> notFound);
+        try (InputStream body = notFoundResponse.getBody()) {
+            body.readAllBytes();
+        }
+        notFoundResponse.close();
+        records.put("http.out.client_error", httpEvent("observability.http.out", clientError));
+
+        // входящий с нестандартным методом, пустым телом и номером карты в разрешённом заголовке
+        HttpServerLoggingFilterTest.RecordingSink other = new HttpServerLoggingFilterTest.RecordingSink();
+        MockHttpServletRequest propfind = new MockHttpServletRequest("PROPFIND", "/api/v1/contract-other/8600123456781233");
+        propfind.addHeader("x-request-id", "r 8600123456781233");
+        new HttpServerLoggingFilter(settings, other).doFilter(propfind, new MockHttpServletResponse(),
+            (req, res) -> ((HttpServletResponse) res).setStatus(409));
+        records.put("http.in.other", httpEvent("observability.http.in", other));
         return records;
+    }
+
+    /** Стек задан явно: одинаков при любом способе запуска тестов и проверяет точку обрезки на сервлете. */
+    private static Throwable withStack(final Throwable error) {
+        error.setStackTrace(new StackTraceElement[] {
+            new StackTraceElement("uz.example.PaymentService", "pay", "PaymentService.java", 42),
+            new StackTraceElement("uz.example.PaymentController", "pay", "PaymentController.java", 17),
+            new StackTraceElement("jakarta.servlet.http.HttpServlet", "service", "HttpServlet.java", 658),
+            new StackTraceElement("org.apache.catalina.core.ApplicationFilterChain", "doFilter",
+                "ApplicationFilterChain.java", 205)
+        });
+        return error;
     }
 
     private static MockHttpServletRequest request(final String path) {

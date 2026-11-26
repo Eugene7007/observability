@@ -331,12 +331,27 @@ public final class HttpLogSettings {
             }
             int eq = pair.indexOf('=');
             String key = eq < 0 ? pair : pair.substring(0, eq);
-            result.append(LogTextMasker.mask(key));
+            result.append(maskQueryKey(key));
             if (eq >= 0) {
                 result.append('=').append(REDACTED);
             }
         }
         return result.isEmpty() ? null : result.toString();
+    }
+
+    /**
+     * Ключ query маскируется в декодированном виде: {@code 8600%201234%205678%201233} — тоже номер карты.
+     * Если маскер ничего не нашёл, ключ остаётся как был, в закодированном виде.
+     */
+    private static String maskQueryKey(final String rawKey) {
+        String decoded;
+        try {
+            decoded = java.net.URLDecoder.decode(rawKey, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            decoded = rawKey;
+        }
+        String masked = LogTextMasker.maskOrPlaceholder(decoded);
+        return masked.equals(decoded) ? LogTextMasker.maskOrPlaceholder(rawKey) : masked;
     }
 
     /** {@code HTTP/1.1} → {@code 1.1}, {@code HTTP/2.0} → {@code 2}, как в примерах OpenTelemetry. */

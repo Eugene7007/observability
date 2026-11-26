@@ -25,7 +25,7 @@
     "userGuid" : "u-1",
     "deviceId" : "d-1",
     "thrown" : {
-      "extendedStackTrace" : "java.lang.IllegalStateException: card 860012******1233"
+      "extendedStackTrace" : "java.lang.IllegalStateException: card 860012******1233\n\tat uz.example.PaymentService.pay(PaymentService.java:42)\n\tat uz.example.PaymentController.pay(PaymentController.java:17)\n\tat jakarta.servlet.http.HttpServlet.service(HttpServlet.java:658)\n\t... [truncated]\n"
     }
   },
   "map" : {
@@ -134,5 +134,47 @@
     "http.request.headers" : "Content-Type=application/json",
     "http.request.method" : "POST",
     "url.full" : "http://contract-refused.internal/api/v1/pay"
+  },
+  "http.out.client_error" : {
+    "@timestamp" : "T",
+    "level" : "WARN",
+    "message" : "HTTP out PROPFIND https://contract-out.internal:8443/api/v1/cards/860012******1233 -> 404 in N ms",
+    "process.thread.name" : "main",
+    "loggerName" : "observability.http.out",
+    "traceId" : "4bf92f3577b34da6a3ce929d0e0e4736",
+    "spanId" : "00f067aa0ba902b7",
+    "correlationId" : "c-1",
+    "clientDeviceId" : "cd-1",
+    "userGuid" : "u-1",
+    "deviceId" : "d-1",
+    "event.duration_ms" : 0,
+    "http.direction" : "out",
+    "http.request.body.bytes" : 0,
+    "http.request.headers" : "x-request-id=r 860012******1233",
+    "http.request.method" : "PROPFIND",
+    "http.response.body.bytes" : 20,
+    "http.response.body.content" : "{\"code\":\"NOT_FOUND\"}",
+    "http.response.status_code" : 404,
+    "url.full" : "https://contract-out.internal:8443/api/v1/cards/860012******1233"
+  },
+  "http.in.other" : {
+    "@timestamp" : "T",
+    "level" : "WARN",
+    "message" : "HTTP in PROPFIND /api/v1/contract-other/860012******1233 -> 409 in N ms",
+    "process.thread.name" : "main",
+    "loggerName" : "observability.http.in",
+    "traceId" : "4bf92f3577b34da6a3ce929d0e0e4736",
+    "spanId" : "00f067aa0ba902b7",
+    "correlationId" : "c-1",
+    "clientDeviceId" : "cd-1",
+    "userGuid" : "u-1",
+    "deviceId" : "d-1",
+    "event.duration_ms" : 0,
+    "http.direction" : "in",
+    "http.request.headers" : "x-request-id=r 860012******1233",
+    "http.request.method" : "PROPFIND",
+    "http.response.body.bytes" : 0,
+    "http.response.status_code" : 409,
+    "url.path" : "/api/v1/contract-other/860012******1233"
   }
 }
