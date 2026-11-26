@@ -65,7 +65,8 @@ abstract class LogFormatContract {
     private static final Set<String> LEVELS = Set.of("TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL");
     private static final Map<String, String> EXPECTED_LEVEL = Map.of(
         "log", "INFO", "error", "ERROR", "map", "INFO",
-        "http.in", "WARN", "http.in.failed", "ERROR", "http.out", "ERROR", "http.out.failed", "ERROR");
+        "http.in", "WARN", "http.in.failed", "ERROR", "http.out", "ERROR", "http.out.failed", "ERROR",
+        "http.in.other", "WARN", "http.out.client_error", "WARN");
 
     @Configuration(proxyBeanMethods = false)
     @ImportAutoConfiguration({ObservabilityAutoConfiguration.class, ObservabilityStatusAutoConfiguration.class})
@@ -210,7 +211,7 @@ abstract class LogFormatContract {
         if ("http.out".equals(kind) && !"502".equals(record.path("error.type").asText())) {
             problems.add(kind + ": error.type «" + record.path("error.type").asText() + "» вместо кода статуса «502»");
         }
-        if (kind.startsWith("http.out") && record.path("server.port").asInt() != 80) {
+        if (("http.out".equals(kind) || "http.out.failed".equals(kind)) && record.path("server.port").asInt() != 80) {
             problems.add(kind + ": server.port " + record.path("server.port") + " вместо 80 по умолчанию для http");
         }
         if ("http.out".equals(kind) && !record.path("url.full").asText().endsWith("/api/v1/pay?lang=REDACTED")) {
@@ -223,14 +224,38 @@ abstract class LogFormatContract {
             problems.add(kind + ": uz.kapitalbank.error.code «" + record.path("uz.kapitalbank.error.code").asText()
                 + "» вместо LIMIT из тела ответа");
         }
-        if (record.path("telemetry.distro.name").asText().isBlank()) {
-            problems.add(kind + ": пустое telemetry.distro.name");
+        if ("http.in.other".equals(kind)) {
+            // нестандартный метод, схема и адреса из заголовков — по OpenTelemetry и замаскированы
+            expectValue(problems, kind, record, "http.request.method", "_OTHER");
+            expectValue(problems, kind, record, "http.request.method_original", "PROPFIND");
+            expectValue(problems, kind, record, "url.scheme", "http");
+            expectValue(problems, kind, record, "server.port", "8080");
+            expectValue(problems, kind, record, "http.route", "/api/v1/contract-other/{id}");
+            if (record.toString().contains("8600123456781233") || record.toString().contains("8600%201234")) {
+                problems.add(kind + ": номер карты из заголовков или query не замаскирован: " + record);
+            }
+        }
+        if ("http.out.client_error".equals(kind)) {
+            expectValue(problems, kind, record, "error.type", "404");
+            expectValue(problems, kind, record, "server.port", "443");
+            expectValue(problems, kind, record, "http.request.method", "_OTHER");
+            expectValue(problems, kind, record, "uz.kapitalbank.error.code", "NOT_FOUND");
+        }
+        if (record.path("uz.kapitalbank.log_library.name").asText().isBlank()) {
+            problems.add(kind + ": пустое uz.kapitalbank.log_library.name");
         }
         String level = record.path("level").asText();
         if (!LEVELS.contains(level)) {
             problems.add(kind + ": уровень «" + level + "» не из набора " + LEVELS);
         } else if (!level.equals(EXPECTED_LEVEL.get(kind))) {
             problems.add(kind + ": уровень " + level + " вместо " + EXPECTED_LEVEL.get(kind));
+        }
+    }
+
+    private static void expectValue(final List<String> problems, final String kind, final JsonNode record,
+                                    final String field, final String expected) {
+        if (!expected.equals(record.path(field).asText())) {
+            problems.add(kind + ": " + field + " «" + record.path(field).asText() + "» вместо «" + expected + "»");
         }
     }
 
@@ -300,6 +325,30 @@ abstract class LogFormatContract {
         }
         response.close();
 
+        // входящий: нестандартный метод, адрес через прокси, номер карты в заголовках и в ключе query
+        MockHttpServletRequest other = new MockHttpServletRequest("PROPFIND", "/api/v1/contract-other/7");
+        other.setQueryString("8600%201234%205678%201233=1");
+        other.addHeader("X-Forwarded-For", "8600123456781233, 10.0.0.1");
+        other.addHeader("X-Forwarded-Proto", "javascript");
+        other.addHeader("Host", "8600123456781233:8080");
+        other.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/v1/contract-other/{id}");
+        new HttpServerLoggingFilter(settings).doFilter(other, new MockHttpServletResponse(),
+            (req, res) -> ((HttpServletResponse) res).setStatus(409));
+
+        // исходящий 4xx по https с нестандартным методом
+        MockClientHttpRequest lookup = new MockClientHttpRequest(HttpMethod.valueOf("PROPFIND"),
+            URI.create("https://contract-client-error.internal/api/v1/cards/7"));
+        lookup.getHeaders().add("Content-Type", "application/json");
+        MockClientHttpResponse notFound = new MockClientHttpResponse(
+            "{\"code\":\"NOT_FOUND\"}".getBytes(StandardCharsets.UTF_8), HttpStatus.NOT_FOUND);
+        notFound.getHeaders().add("Content-Type", "application/json");
+        ClientHttpResponse notFoundResponse = new HttpClientLoggingInterceptor(settings)
+            .intercept(lookup, "{}".getBytes(StandardCharsets.UTF_8), (req, body) -> notFound);
+        try (InputStream body = notFoundResponse.getBody()) {
+            body.readAllBytes();
+        }
+        notFoundResponse.close();
+
         // исходящий, упавший до ответа
         MockClientHttpRequest refused = new MockClientHttpRequest(HttpMethod.POST, URI.create(
             "http://contract-refused.internal/api/v1/pay"));
@@ -332,9 +381,11 @@ abstract class LogFormatContract {
         if (message.contains("contract-large") || "contract-npe".equals(message)) {
             kind = null;
         } else if ("observability.http.in".equals(logger)) {
-            kind = message.contains("contract-failed") ? "http.in.failed" : "http.in";
+            kind = message.contains("contract-failed") ? "http.in.failed"
+                : message.contains("contract-other") ? "http.in.other" : "http.in";
         } else if ("observability.http.out".equals(logger)) {
-            kind = message.contains("contract-refused") ? "http.out.failed" : "http.out";
+            kind = message.contains("contract-refused") ? "http.out.failed"
+                : message.contains("contract-client-error") ? "http.out.client_error" : "http.out";
         } else if ("contract-map".equals(logger)) {
             kind = "map";
         } else if (message.startsWith("contract-")) {

@@ -188,4 +188,78 @@ class OtelSemanticFieldsTest {
         assertThat(message.get("http.response.body.size")).isEqualTo("2");
         assertThat(message.get(HttpLogFields.RESPONSE_BODY_APP_SIZE)).isEqualTo("2");
     }
+    @Test
+    void pathAndRouteIncludeContextPathAndHandlerExceptionIsUnwrapped() throws Exception {
+        HttpServerLoggingFilterTest.RecordingSink sink = new HttpServerLoggingFilterTest.RecordingSink();
+        HttpServerLoggingFilter filter = new HttpServerLoggingFilter(new HttpLogSettings(new HttpLogProperties()), sink);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/p2p/api/cards/7");
+        request.setContextPath("/p2p");
+        request.setAttribute(org.springframework.web.servlet.HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE,
+            "/api/cards/{id}");
+        try {
+            filter.doFilter(request, new MockHttpServletResponse(), (req, res) -> {
+                throw new jakarta.servlet.ServletException("wrapped", new IllegalArgumentException("bad"));
+            });
+        } catch (jakarta.servlet.ServletException expected) {
+            HttpServerLoggingFilter.completeRequest(request);
+        }
+        HttpLogMessage message = sink.single(Level.ERROR);
+        // по OpenTelemetry: url.path — путь из URI, http.route — с корнем приложения
+        assertThat(message.get("url.path")).isEqualTo("/p2p/api/cards/7");
+        assertThat(message.get("http.route")).isEqualTo("/p2p/api/cards/{id}");
+        assertThat(message.get("error.type")).isEqualTo("java.lang.IllegalArgumentException");
+        // message и прежний формат — без context-path, как раньше
+        assertThat(message.getFormattedMessage()).startsWith("HTTP in POST /api/cards/7 ->");
+        assertThat(message.legacyFields()).containsEntry("url.path", "/api/cards/7")
+            .containsEntry("http.route", "/api/cards/{id}")
+            .containsEntry("error.type", "jakarta.servlet.ServletException");
+    }
+
+    @Test
+    void forwardedFollowsOpenTelemetryOrderAndFormats() throws Exception {
+        HttpServerLoggingFilterTest.RecordingSink sink = new HttpServerLoggingFilterTest.RecordingSink();
+        HttpServerLoggingFilter filter = new HttpServerLoggingFilter(new HttpLogSettings(new HttpLogProperties()), sink);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/x");
+        request.addHeader("Forwarded", "for=\"[2001:db8::7]:4711\";proto=https;host=\"[2001:db8::1]:8443\"");
+        request.addHeader("X-Forwarded-Proto", "http");
+        request.addHeader("X-Forwarded-Host", "ignored.example");
+        filter.doFilter(request, new MockHttpServletResponse(), (req, res) -> { });
+        HttpLogMessage message = sink.single(Level.INFO);
+        assertThat(message.get("url.scheme")).isEqualTo("https");
+        assertThat(message.get("server.address")).isEqualTo("2001:db8::1");
+        assertThat(message.get("server.port")).isEqualTo("8443");
+        assertThat(message.get("client.address")).isEqualTo("2001:db8::7");
+    }
+
+    @Test
+    void hostHeaderPortAndObfuscatedClient() throws Exception {
+        HttpServerLoggingFilterTest.RecordingSink sink = new HttpServerLoggingFilterTest.RecordingSink();
+        HttpServerLoggingFilter filter = new HttpServerLoggingFilter(new HttpLogSettings(new HttpLogProperties()), sink);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/x");
+        request.addHeader("Host", "api.kapitalbank.uz:8080");
+        request.addHeader("X-Forwarded-Proto", "https");
+        request.addHeader("X-Forwarded-Port", "not-a-port");
+        request.addHeader("Forwarded", "for=_hidden");
+        request.setRemoteAddr("10.0.0.5");
+        filter.doFilter(request, new MockHttpServletResponse(), (req, res) -> { });
+        HttpLogMessage message = sink.single(Level.INFO);
+        assertThat(message.get("server.address")).isEqualTo("api.kapitalbank.uz");
+        // порт из Host, а не 443 по схеме; неверный X-Forwarded-Port игнорируется
+        assertThat(message.get("server.port")).isEqualTo("8080");
+        assertThat(message.get("client.address")).isEqualTo("10.0.0.5");
+    }
+
+    @Test
+    void outgoingIpv6HostIsWithoutBrackets() throws Exception {
+        HttpServerLoggingFilterTest.RecordingSink sink = new HttpServerLoggingFilterTest.RecordingSink();
+        org.springframework.mock.http.client.MockClientHttpRequest request =
+            new org.springframework.mock.http.client.MockClientHttpRequest(org.springframework.http.HttpMethod.GET,
+                java.net.URI.create("http://[2001:db8::1]:8080/api"));
+        new HttpClientLoggingInterceptor(new HttpLogSettings(new HttpLogProperties()), sink)
+            .intercept(request, new byte[0], (req, body) -> new org.springframework.mock.http.client.MockClientHttpResponse(
+                new byte[0], org.springframework.http.HttpStatus.OK));
+        HttpLogMessage message = sink.single(Level.INFO);
+        assertThat(message.get("server.address")).isEqualTo("2001:db8::1");
+        assertThat(message.get("server.port")).isEqualTo("8080");
+    }
 }

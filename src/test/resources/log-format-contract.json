@@ -9,8 +9,8 @@
     "service.name": "string",
     "service.version": "string",
     "deployment.environment.name": "string",
-    "telemetry.distro.name": "string",
-    "telemetry.distro.version": "string",
+    "uz.kapitalbank.log_library.name": "string",
+    "uz.kapitalbank.log_library.version": "string",
     "trace_id": "string",
     "span_id": "string",
     "user.id": "string",
@@ -96,6 +96,37 @@
       "http.request.body.content": "string",
       "uz.kapitalbank.duration_ms": "number",
       "error.type": "string"
+    },
+    "http.in.other": {
+      "client.address": "string",
+      "http.request.method": "string",
+      "http.request.method_original": "string",
+      "http.response.status_code": "number",
+      "http.route": "string",
+      "network.protocol.version": "string",
+      "server.address": "string",
+      "server.port": "number",
+      "url.path": "string",
+      "url.query": "string",
+      "url.scheme": "string",
+      "uz.kapitalbank.duration_ms": "number",
+      "uz.kapitalbank.http.response.body.app_size": "number"
+    },
+    "http.out.client_error": {
+      "error.type": "string",
+      "http.request.body.content": "string",
+      "http.request.body.size": "number",
+      "http.request.header.*": "array",
+      "http.request.method": "string",
+      "http.request.method_original": "string",
+      "http.response.body.content": "string",
+      "http.response.status_code": "number",
+      "server.address": "string",
+      "server.port": "number",
+      "url.full": "string",
+      "uz.kapitalbank.duration_ms": "number",
+      "uz.kapitalbank.error.code": "string",
+      "uz.kapitalbank.http.response.body.app_size": "number"
     }
   }
 }

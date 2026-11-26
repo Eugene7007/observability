@@ -9,8 +9,9 @@ import org.apache.logging.log4j.core.lookup.StrLookup;
 
 /**
  * Lookup {@code ${libobservability:name}} и {@code ${libobservability:version}} — имя и версия библиотеки для полей
- * {@code telemetry.distro.name} и {@code telemetry.distro.version} (OpenTelemetry semantic conventions): по ним
- * в логах видно, какой версией библиотеки сделана запись. Версию подставляет Gradle в {@code version.properties}.
+ * {@code uz.kapitalbank.log_library.name} и {@code uz.kapitalbank.log_library.version}: по ним в логах видно, какой
+ * версией библиотеки сделана запись. Не {@code telemetry.distro.*}: в OpenTelemetry это дистрибутив OTel (агент),
+ * и с подключением OTel Java agent одно поле получило бы два смысла. Версию подставляет Gradle в {@code version.properties}.
  */
 @Plugin(name = "libobservability", category = StrLookup.CATEGORY)
 public final class LibraryLookup implements StrLookup {

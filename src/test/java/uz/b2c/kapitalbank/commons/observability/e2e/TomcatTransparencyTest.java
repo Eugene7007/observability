@@ -316,6 +316,15 @@ class TomcatTransparencyTest {
             assertThat(line).as("response body for %s", c).contains("\"http.response.body.content\":");
             // MDC запроса есть и в записи, отложенной до страницы ошибки
             assertThat(line).contains("\"uz.kapitalbank.correlation_id\":");
+            // маршрут — обработчика, а не страницы ошибки /error; у 404 и 405 обработчика нет
+            assertThat(line).as("route for %s", c).doesNotContain("\"http.route\":\"/error\"");
+            if (c.status() != 404 && c.status() != 405 && c.status() != 415) {
+                assertThat(line).as("route for %s", c).contains("\"http.route\":\"" + c.path() + "\"");
+            }
+            if (c.status() == 500) {
+                // исключение обработчика, а не обёртка контейнера
+                assertThat(line).contains("\"error.type\":\"java.lang.IllegalStateException\"");
+            }
         }
         assertThat(log).doesNotContain(PAN);
         // страница ошибки не даёт отдельной записи
