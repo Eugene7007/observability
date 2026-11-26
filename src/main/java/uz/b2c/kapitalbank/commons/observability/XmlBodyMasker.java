@@ -355,12 +355,12 @@ public final class XmlBodyMasker {
             rule = Rule.NAME;
         }
 
-        if (rule == null && !rules.pathRules().isEmpty()) {
+        // поле по пути от команды: более строгое из правил, база не ослабляет то, что команда скрыла
+        if (rule != Rule.HIDE && !rules.pathRules().isEmpty()) {
             String[] path = buildPath(stack, name, includeCurrentElement);
             for (MaskingRules.PathRule pathRule : rules.pathRules()) {
                 if (matchesPath(path, pathRule.segments())) {
-                    rule = pathRule.rule();
-                    break;
+                    rule = MaskingRules.stricter(rule, pathRule.rule());
                 }
             }
         }

@@ -64,7 +64,9 @@ public final class MaskedExceptionResolverFactory implements EventResolverFactor
 
                 @Override
                 void write(final Throwable thrown, final JsonWriter writer) {
-                    writer.writeString(LogTextMasker.maskOrPlaceholder(thrown.getMessage()));
+                    // сообщение читается второй раз; если оно непостоянно и теперь null — пустая строка, не заглушка
+                    String message = thrown.getMessage();
+                    writer.writeString(message == null ? "" : LogTextMasker.maskOrPlaceholder(message));
                 }
             };
         }

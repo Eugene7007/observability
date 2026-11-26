@@ -77,15 +77,17 @@ class DictionaryReview20261125Test {
 
     @Test
     void businessFieldsAreNoLongerOverMasked() {
-        for (String name : List.of("terminalSerialNo", "posSerialNo", "deviceSerialNo", "PCODE", "authorizationCode",
-            "authorizationResponse", "authorizationDateTime", "birthCountryId")) {
+        for (String name : List.of("terminalSerialNo", "posSerialNo", "deviceSerialNo", "PCODE",
+            "authorizationDateTime", "birthCountryId")) {
             assertThat(rules.ruleFor(name)).as(name).isNull();
         }
         // точные имена процессинга остаются скрытыми
         assertThat(rules.ruleFor("SERIAL_NO")).isEqualTo(MaskingRules.Rule.HIDE);
         assertThat(rules.ruleFor("R_PCODE")).isEqualTo(MaskingRules.Rule.HIDE);
         // заголовок авторизации и его варианты — секрет
-        for (String name : List.of("Authorization", "proxyAuthorization", "authorizationHeader", "authorizationToken")) {
+        for (String name : List.of("Authorization", "proxyAuthorization", "authorizationHeader", "authorizationToken",
+            // ревью 2026-11-26: код и ответ авторизации — секрет, пока не подтверждено обратное
+            "authorizationCode", "authorizationResponse")) {
             assertThat(rules.ruleFor(name)).as(name).isEqualTo(MaskingRules.Rule.HIDE);
         }
         // cardName — открытый вопрос к командам (название карты или имя на ней), пока скрывается как имя
