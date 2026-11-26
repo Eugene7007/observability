@@ -15,7 +15,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.servlet.HandlerMapping;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -296,18 +298,39 @@ public class HttpServerLoggingFilter extends OncePerRequestFilter {
         String summary = "HTTP in " + request.getMethod() + " " + path + " -> " + outcome + " in " + durationMs + " ms";
 
         // имена полей — OpenTelemetry semantic conventions (HTTP server); свои поля — под префиксом uz.kapitalbank.
+        String method = request.getMethod();
+        String errorType = failure != null ? failure.getClass().getName()
+            : status >= SERVER_ERROR ? String.valueOf(status) : null;
         HttpLogMessage message = new HttpLogMessage(summary)
-            .field("http.request.method", request.getMethod())
-            .field("url.scheme", request.getScheme())
+            .field("http.request.method", HttpLogSettings.otelMethod(method))
+            .field("http.request.method_original", HttpLogSettings.knownMethod(method) ? null : method)
+            .field("url.scheme", Forwarded.scheme(request))
             .field("url.path", path)
+            .field("url.query", HttpLogSettings.redactQuery(request.getQueryString()))
             .field("http.route", route)
+            .field("server.address", Forwarded.host(request))
+            .field("server.port", Forwarded.port(request))
+            .field("client.address", Forwarded.client(request))
+            .field("network.protocol.version", HttpLogSettings.protocolVersion(request.getProtocol()))
+            .field("user_agent.original", userAgent(request))
             .field("http.response.status_code", status)
             .field(HttpLogFields.DURATION_MS, durationMs)
             // error.type по OpenTelemetry: класс исключения, а без него у 5xx — код статуса строкой
-            .field("error.type", failure != null ? failure.getClass().getName()
-                : status >= SERVER_ERROR ? String.valueOf(status) : null);
-        settings.addRequestHeaders(message, Collections.list(request.getHeaderNames()),
-            name -> Collections.list(request.getHeaders(name)));
+            .field("error.type", errorType);
+        // User-Agent уже есть в user_agent.original: в http.request.header.* не дублируется
+        List<String> headerNames = new ArrayList<>(Collections.list(request.getHeaderNames()));
+        headerNames.removeIf("User-Agent"::equalsIgnoreCase);
+        settings.addRequestHeaders(message, headerNames, name -> Collections.list(request.getHeaders(name)));
+        // прежний формат для Kafka-топика (rc1/rc2), порядок полей — как раньше
+        message.legacy("http.direction", "in")
+            .legacy("http.request.method", method)
+            .legacy("url.path", path)
+            .legacy("http.route", route)
+            .legacy("http.response.status_code", status)
+            .legacy("event.duration_ms", durationMs)
+            .legacy("http.request.headers", settings.renderHeaders(
+                Collections.list(request.getHeaderNames()), request::getHeader))
+            .legacy("error.type", failure == null ? null : failure.getClass().getName());
 
         boolean includeBodies = settings.includeBodies(status, failure != null, pathWithinApplication(request));
         if (includeBodies) {
@@ -323,15 +346,30 @@ public class HttpServerLoggingFilter extends OncePerRequestFilter {
             } else {
                 content = settings.renderBody(capturedRequest.capture(), request.getContentType());
             }
-            message.field("http.request.body.size", bytes > 0 ? bytes : null)
-                .field("http.request.body.content", content);
+            long declared = request.getContentLengthLong();
+            // http.request.body.size — байты по сети (Content-Length); сколько прочитало приложение — своё поле
+            message.field("http.request.body.size", declared >= 0 ? declared : null)
+                .field("http.request.body.content", content)
+                .field(HttpLogFields.REQUEST_BODY_APP_SIZE, bytes > 0 ? bytes : null);
+            message.legacy("http.request.body.bytes", bytes > 0 ? bytes : null)
+                .legacy("http.request.body.content", content);
         }
         if (includeBodies) {
             String responseBody = settings.renderBody(capturedResponse.capture(), response.getContentType());
-            message.field("http.response.body.size", capturedResponse.capture().total())
+            long total = capturedResponse.capture().total();
+            long declared = capturedResponse.declaredLength();
+            message.field("http.response.body.size", declared >= 0 ? declared : null)
                 .field("http.response.body.content", responseBody)
+                .field(HttpLogFields.RESPONSE_BODY_APP_SIZE, total)
                 .field(HttpLogFields.ERROR_CODE, status >= CLIENT_ERROR ? HttpLogSettings.errorCode(responseBody) : null);
+            message.legacy("http.response.body.bytes", total)
+                .legacy("http.response.body.content", responseBody);
         }
         return message;
+    }
+
+    private static String userAgent(final HttpServletRequest request) {
+        String agent = request.getHeader("User-Agent");
+        return agent == null || agent.isEmpty() ? null : LogTextMasker.maskOrPlaceholder(agent);
     }
 }

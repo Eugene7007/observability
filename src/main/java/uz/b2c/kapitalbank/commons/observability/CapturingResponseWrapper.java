@@ -21,6 +21,7 @@ final class CapturingResponseWrapper extends HttpServletResponseWrapper {
     private ServletOutputStream stream;
     private PrintWriter writer;
     private boolean errorSent;
+    private long declaredLength = -1;
 
     CapturingResponseWrapper(final HttpServletResponse response, final int limit) {
         super(response);
@@ -29,6 +30,57 @@ final class CapturingResponseWrapper extends HttpServletResponseWrapper {
 
     BodyCapture capture() {
         return capture;
+    }
+
+    /** Content-Length, который объявило приложение, или -1: размер тела по сети для http.response.body.size. */
+    long declaredLength() {
+        return declaredLength;
+    }
+
+    @Override
+    public void setContentLength(final int length) {
+        declaredLength = length;
+        super.setContentLength(length);
+    }
+
+    @Override
+    public void setContentLengthLong(final long length) {
+        declaredLength = length;
+        super.setContentLengthLong(length);
+    }
+
+    @Override
+    public void setHeader(final String name, final String value) {
+        rememberLength(name, value);
+        super.setHeader(name, value);
+    }
+
+    @Override
+    public void addHeader(final String name, final String value) {
+        rememberLength(name, value);
+        super.addHeader(name, value);
+    }
+
+    @Override
+    public void setIntHeader(final String name, final int value) {
+        rememberLength(name, String.valueOf(value));
+        super.setIntHeader(name, value);
+    }
+
+    @Override
+    public void addIntHeader(final String name, final int value) {
+        rememberLength(name, String.valueOf(value));
+        super.addIntHeader(name, value);
+    }
+
+    private void rememberLength(final String name, final String value) {
+        if ("Content-Length".equalsIgnoreCase(name) && value != null) {
+            try {
+                declaredLength = Long.parseLong(value.trim());
+            } catch (NumberFormatException e) {
+                declaredLength = -1;
+            }
+        }
     }
 
     /** Ответ отдан через sendError: тело напишет страница ошибки (в Spring Boot — /error) уже после цепочки. */
@@ -84,6 +136,7 @@ final class CapturingResponseWrapper extends HttpServletResponseWrapper {
     public void reset() {
         super.reset();
         capture.reset();
+        declaredLength = -1;
     }
 
     /**

@@ -55,7 +55,9 @@
     "$resolver": "ndc"
   },
   "httpFields": {
-    "$resolver": "maskedMap"
+    "$resolver": "maskedMap",
+    "prefix": "data.",
+    "fields": "legacy"
   },
   "thrown": {
     "extendedStackTrace": {

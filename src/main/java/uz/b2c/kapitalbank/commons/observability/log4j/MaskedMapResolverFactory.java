@@ -46,15 +46,19 @@ public final class MaskedMapResolverFactory implements EventResolverFactory {
     @Override
     public EventResolver create(final EventResolverContext context, final TemplateResolverConfig config) {
         String prefix = config.exists("prefix") ? config.getString("prefix") : HttpLogFields.DATA_PREFIX;
-        return new Resolver(prefix);
+        // "fields": "legacy" — прежний набор полей HTTP-записей (rc1/rc2) для Kafka-топика старых потребителей
+        boolean legacy = config.exists("fields") && "legacy".equals(config.getString("fields"));
+        return new Resolver(prefix, legacy);
     }
 
     private static final class Resolver implements EventResolver {
 
         private final String prefix;
+        private final boolean legacy;
 
-        Resolver(final String prefix) {
+        Resolver(final String prefix, final boolean legacy) {
             this.prefix = prefix;
+            this.legacy = legacy;
         }
 
         @Override
@@ -76,6 +80,18 @@ public final class MaskedMapResolverFactory implements EventResolverFactory {
         @Override
         public void resolve(final LogEvent event, final JsonWriter writer, final boolean succeedingEntry) {
             if (!(event.getMessage() instanceof MapMessage<?, ?> message)) {
+                return;
+            }
+            if (legacy && message instanceof HttpLogMessage http) {
+                boolean separator = succeedingEntry;
+                for (java.util.Map.Entry<String, Object> field : http.legacyFields().entrySet()) {
+                    if (separator) {
+                        writer.writeSeparator();
+                    }
+                    separator = true;
+                    writer.writeObjectKey(field.getKey());
+                    writer.writeValue(field.getValue());
+                }
                 return;
             }
             boolean trusted = message instanceof HttpLogMessage;

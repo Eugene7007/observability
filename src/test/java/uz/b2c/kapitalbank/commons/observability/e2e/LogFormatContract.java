@@ -175,6 +175,11 @@ abstract class LogFormatContract {
             if (field.getValue().isNull()) {
                 problems.add("«" + message + "»: поле " + field.getKey() + " = null (поле без значения не пишется)");
             }
+            // нераскрытая подстановка log4j (lookup не найден) — не значение
+            if (field.getValue().isTextual() && field.getValue().asText().contains("${")) {
+                problems.add("«" + message + "»: поле " + field.getKey() + " = " + field.getValue()
+                    + " (нераскрытая подстановка)");
+            }
         });
         if ("contract-npe".equals(message) && record.has("exception.message")) {
             problems.add("contract-npe: у исключения без сообщения есть exception.message");
@@ -207,6 +212,12 @@ abstract class LogFormatContract {
         }
         if (kind.startsWith("http.out") && record.path("server.port").asInt() != 80) {
             problems.add(kind + ": server.port " + record.path("server.port") + " вместо 80 по умолчанию для http");
+        }
+        if ("http.out".equals(kind) && !record.path("url.full").asText().endsWith("/api/v1/pay?lang=REDACTED")) {
+            problems.add(kind + ": url.full «" + record.path("url.full").asText() + "» — query не по OpenTelemetry");
+        }
+        if ("http.in".equals(kind) && !"lang=REDACTED".equals(record.path("url.query").asText())) {
+            problems.add(kind + ": url.query «" + record.path("url.query").asText() + "» вместо lang=REDACTED");
         }
         if ("http.in".equals(kind) && !"LIMIT".equals(record.path("uz.kapitalbank.error.code").asText())) {
             problems.add(kind + ": uz.kapitalbank.error.code «" + record.path("uz.kapitalbank.error.code").asText()
@@ -247,6 +258,7 @@ abstract class LogFormatContract {
             HttpServletResponse response = (HttpServletResponse) res;
             response.setStatus(422);
             response.setContentType("application/json");
+            response.setContentLength(16);
             response.getWriter().write("{\"code\":\"LIMIT\"}");
         });
 
@@ -280,6 +292,7 @@ abstract class LogFormatContract {
         MockClientHttpResponse wire = new MockClientHttpResponse(
             "{\"code\":\"DECLINED\"}".getBytes(StandardCharsets.UTF_8), HttpStatus.BAD_GATEWAY);
         wire.getHeaders().add("Content-Type", "application/json");
+        wire.getHeaders().setContentLength(19);
         ClientHttpResponse response = new HttpClientLoggingInterceptor(settings)
             .intercept(outgoing, "{\"amount\":100}".getBytes(StandardCharsets.UTF_8), (req, body) -> wire);
         try (InputStream body = response.getBody()) {
@@ -307,12 +320,13 @@ abstract class LogFormatContract {
         request.setContentType("application/json");
         request.setContent("{\"amount\":100}".getBytes(StandardCharsets.UTF_8));
         request.addHeader("Accept-Language", "ru-RU");
+        request.addHeader("User-Agent", "KapitalbankApp/5.1 (Android 14)");
         request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, path.replace("/7", "/{id}"));
         return request;
     }
 
     private static String kindOf(final JsonNode record) {
-        String logger = record.path("logger").asText();
+        String logger = record.path("otel.scope.name").asText();
         String message = record.path("message").asText();
         String kind = null;
         if (message.contains("contract-large") || "contract-npe".equals(message)) {
