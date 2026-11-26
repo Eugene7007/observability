@@ -16,8 +16,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * Базовые правила распознают поле по частям имени, а не по точному совпадению: имя разбивается на слова
  * (camelCase, snake_case, kebab-case), поэтому {@code cardNumber}, {@code card_number}, {@code senderCardNumber},
  * {@code CARD_NO} одинаково считаются номером карты, а {@code newPassword}, {@code access_token},
- * {@code clientSecret} — секретами. Базовые правила проверяются первыми, и команда не может их ни убрать,
- * ни ослабить: её поля применяются только к именам, которые база не узнала. Выключателя маскирования нет.
+ * {@code clientSecret} — секретами. Команда может только добавить правила: если поле узнали и база, и команда
+ * (по имени или по пути), применяется более строгое из правил ({@link Rule#strictness()}), поэтому команда не может
+ * ослабить базу, а расширение базы не может ослабить поле, которое команда скрыла. Выключателя маскирования нет.
  * <p>
  * Одни и те же правила используют маскирование тел HTTP ({@link JsonBodyMasker}) и каждой строки лога
  * ({@link LogTextMasker}). До старта Spring-контекста для строк лога действуют только базовые правила,
@@ -28,21 +29,43 @@ public final class MaskingRules {
     /** Как маскируется значение. */
     public enum Rule {
         /** Номер карты: первые 6 и последние 4 цифры. Уже замаскированный номер не трогается. */
-        PAN,
+        PAN(5),
         /** Телефон, счёт: только последние 4 символа. */
-        TAIL,
+        TAIL(6),
         /** ФИО: только первая буква. */
-        NAME,
+        NAME(7),
         /** Значение скрывается целиком, включая вложенные объекты. */
-        HIDE,
+        HIDE(8),
         /** Код подтверждения: 4–8 цифр скрываются в любом виде; бизнес-коды вроде CARD_EXPIRED остаются. */
-        DIGITS,
+        DIGITS(3),
         /** Поле {@code code}: строка из цифр скрывается (OTP), число и текст остаются (коды ошибок). */
-        CODE,
+        CODE(2),
         /** Почта: первая буква и домен. */
-        EMAIL,
+        EMAIL(4),
         /** Адрес: схема, хост и путь остаются, параметры запроса скрываются. */
-        URL
+        URL(1);
+
+        private final int strictness;
+
+        Rule(final int strictness) {
+            this.strictness = strictness;
+        }
+
+        /** Строгость: чем больше, тем меньше от значения остаётся в логе. HIDE — самое строгое. */
+        public int strictness() {
+            return strictness;
+        }
+    }
+
+    /** Более строгое из двух правил; {@code null} — поле не ПДн. */
+    static Rule stricter(final Rule a, final Rule b) {
+        if (a == null) {
+            return b;
+        }
+        if (b == null) {
+            return a;
+        }
+        return b.strictness > a.strictness ? b : a;
     }
 
     /** Слова, при наличии которых в любом месте имени значение скрывается целиком. */
@@ -50,6 +73,9 @@ public final class MaskingRules {
         "cvv", "cvv2", "cvc", "cvc2", "pinfl", "otp", "password", "passwd", "pwd", "secret", "token", "tokens",
         "passport", "jwt", "credential", "credentials", "cookie", "jshshir", "dob", "birthday",
         "address",
+        // заголовок и данные авторизации в любом месте имени: authorizationKey, authorizationValue;
+        // деловые поля авторизации платежа открыты явным списком (AUTHORIZATION_BUSINESS_LAST)
+        "authorization",
         // код безопасности карты под другими именами (CSC, CVN)
         "csc", "cvn",
         // чувствительные аутентификационные данные карты (PCI DSS): не хранятся ни в каком виде
@@ -59,7 +85,7 @@ public final class MaskingRules {
 
     /** Последнее слово имени, при котором значение скрывается целиком. */
     private static final Set<String> HIDE_LAST = Set.of(
-        "pin", "expiry", "expire", "expiration", "smscode", "birthdate", "birth", "inn", "tin", "codeword", "authorization",
+        "pin", "expiry", "expire", "expiration", "smscode", "birthdate", "birth", "inn", "tin", "codeword",
         "cred", "creds", "salt",
         // ИНН: taxPayerCode, taxId
         "taxpayercode", "taxpayerid", "taxpayernumber", "taxid",
@@ -81,6 +107,15 @@ public final class MaskingRules {
         "security code", "secure code", "verification value",
         // процессинг: PERSON_CODE — ПИНФЛ, ID_CARD — удостоверение личности
         "person code", "id card");
+
+    /**
+     * Последнее слово, при котором поле со словом authorization — деловое, а не секрет: authorizationDateTime,
+     * authorizationStatus, authorizationId. {@code authorizationCode} сюда не входит, пока не подтверждено, что это
+     * код одобрения процессинга (ISO 8583, поле 38), а не OAuth-код.
+     */
+    private static final Set<String> AUTHORIZATION_BUSINESS_LAST = Set.of(
+        "date", "time", "datetime", "timestamp", "id", "status", "state", "service", "helper", "path", "type", "mode",
+        "required", "enabled", "method", "result");
 
     /** Слова документа и детали, при которых поле документа скрывается: documentSeria, docIssueDate, docGivePlace. */
     private static final Set<String> DOC_WORDS = Set.of("doc", "docs", "document", "documents", "identity");
@@ -211,10 +246,29 @@ public final class MaskingRules {
         return cached != null ? cached.orElse(null) : compute(name);
     }
 
+    /**
+     * Правило базы и правило команды по имени — более строгое из двух. Варианты имени без суффикса языка и без номера
+     * на конце проверяются для обоих: {@code loyaltyId2} в поле команды {@code loyaltyId} — то же поле.
+     */
     private Rule compute(final String name) {
-        Rule rule = baseRule(name);
-        if (rule == null) {
-            rule = teamNames.get(normalize(name));
+        List<String> words = words(name);
+        if (words.isEmpty()) {
+            return null;
+        }
+        Rule base = baseRule(words);
+        Rule team = teamNames.isEmpty() ? null : teamRule(words);
+        return stricter(base, team);
+    }
+
+    private Rule teamRule(final List<String> words) {
+        Rule rule = teamNames.get(String.join("", words));
+        if (rule == null && hasVariants(words)) {
+            for (List<String> variant : variants(words)) {
+                rule = teamNames.get(String.join("", variant));
+                if (rule != null) {
+                    break;
+                }
+            }
         }
         return rule;
     }
@@ -238,26 +292,55 @@ public final class MaskingRules {
 
     /**
      * Базовое правило банка по словам имени. Если по словам как есть правила нет, имя проверяется ещё раз без
-     * суффикса языка ({@code firstNameLatin} → first name) и без номеров на конце слов ({@code EXP_DATE1},
-     * {@code address2}): это то же поле.
+     * суффикса языка ({@code firstNameLatin} → first name) и без номеров на конце ({@code EXP_DATE1}, {@code address2},
+     * {@code pin_2}, {@code PIN_EN_1}): это то же поле.
      */
     static Rule baseRule(final String name) {
-        List<String> words = words(name);
+        return baseRule(words(name));
+    }
+
+    private static Rule baseRule(final List<String> words) {
         if (words.isEmpty()) {
             return null;
         }
         Rule rule = ruleForWords(words);
-        if (rule == null) {
-            List<String> withoutDigits = withoutTrailingDigits(words);
-            rule = ruleForWords(withoutLanguage(words));
-            if (rule == null) {
-                rule = ruleForWords(withoutDigits);
-            }
-            if (rule == null) {
-                rule = ruleForWords(withoutLanguage(withoutDigits));
+        // варианты перебираются только у имён с суффиксом языка или цифрой на конце слова: у остальных их нет
+        if (rule == null && hasVariants(words)) {
+            for (List<String> variant : variants(words)) {
+                rule = ruleForWords(variant);
+                if (rule != null) {
+                    break;
+                }
             }
         }
         return rule;
+    }
+
+    /** Есть ли у имени варианты: последнее слово — суффикс языка или какое-то слово кончается цифрой. */
+    private static boolean hasVariants(final List<String> words) {
+        if (words.size() > 1 && LANGUAGE_SUFFIXES.contains(words.get(words.size() - 1))) {
+            return true;
+        }
+        for (String word : words) {
+            if (Character.isDigit(word.charAt(word.length() - 1))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Без суффикса языка; без номеров на концах слов; без того и другого — в этом порядке, без повторов. */
+    private static List<List<String>> variants(final List<String> words) {
+        List<String> withoutLanguage = withoutLanguage(words);
+        List<String> withoutDigits = withoutTrailingDigits(words);
+        List<String> withoutBoth = withoutLanguage(withoutDigits);
+        List<List<String>> result = new ArrayList<>(3);
+        for (List<String> variant : List.of(withoutLanguage, withoutDigits, withoutBoth)) {
+            if (!variant.isEmpty() && !variant.equals(words) && !result.contains(variant)) {
+                result.add(variant);
+            }
+        }
+        return result;
     }
 
     private static Rule ruleForWords(final List<String> words) {
@@ -266,16 +349,16 @@ public final class MaskingRules {
         }
         String last = words.get(words.size() - 1);
         String pair = words.size() > 1 ? words.get(words.size() - 2) + " " + last : null;
-        String joined = String.join("", words);
+        String joined = words.size() == 1 ? last : String.join("", words);
         Rule rule = null;
-        if (words.stream().anyMatch(HIDE_ANYWHERE::contains) || HIDE_LAST.contains(last)
+        if (anyIn(words, HIDE_ANYWHERE) && !businessAuthorization(words, last) || HIDE_LAST.contains(last)
             || HIDE_LAST.contains(joined) || (pair != null && HIDE_LAST_PAIR.contains(pair)) || documentDetail(words, last)) {
             rule = Rule.HIDE;
         } else if (PAN_LAST.contains(last) || PAN_LAST.contains(joined)
             || (pair != null && PAN_LAST_PAIR.contains(pair))) {
             rule = Rule.PAN;
         } else if (TAIL_LAST.contains(last) || TAIL_LAST.contains(joined)
-            || (pair != null && TAIL_LAST_PAIR.contains(pair)) || words.stream().anyMatch(TAIL_ANYWHERE::contains)) {
+            || (pair != null && TAIL_LAST_PAIR.contains(pair)) || anyIn(words, TAIL_ANYWHERE)) {
             rule = Rule.TAIL;
         } else if (NAME_LAST.contains(last) || NAME_LAST.contains(joined)
             || ("name".equals(last) && words.size() > 1 && NAME_QUALIFIERS.contains(words.get(words.size() - 2)))) {
@@ -293,10 +376,35 @@ public final class MaskingRules {
         return rule;
     }
 
+    private static boolean anyIn(final List<String> words, final Set<String> set) {
+        for (String word : words) {
+            if (set.contains(word)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Деловое поле авторизации платежа (authorizationDateTime, authorizationStatus): слово authorization — единственное
+     * секретное слово в имени, и оно не последнее, а последнее слово — из явного списка.
+     */
+    private static boolean businessAuthorization(final List<String> words, final String last) {
+        if (!AUTHORIZATION_BUSINESS_LAST.contains(last) || !words.contains("authorization")) {
+            return false;
+        }
+        for (String word : words) {
+            if (!"authorization".equals(word) && HIDE_ANYWHERE.contains(word)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** Поле документа: серия, номер, место и дата выдачи (documentSeria, docIssueDate, docGivePlace). */
     private static boolean documentDetail(final List<String> words, final String last) {
-        return words.size() > 1 && words.stream().anyMatch(DOC_WORDS::contains)
-            && (DOC_DETAIL_LAST.contains(last) || words.stream().anyMatch(DOC_DETAIL_ANYWHERE::contains));
+        return words.size() > 1 && anyIn(words, DOC_WORDS)
+            && (DOC_DETAIL_LAST.contains(last) || anyIn(words, DOC_DETAIL_ANYWHERE));
     }
 
     private static List<String> withoutLanguage(final List<String> words) {
@@ -307,10 +415,18 @@ public final class MaskingRules {
         return end == words.size() ? words : words.subList(0, end);
     }
 
+    /**
+     * Без номеров на концах слов: {@code address2} → address, {@code en1} → en; слово из одних цифр в конце имени
+     * отбрасывается ({@code pin_2} → pin). Слово, от которого без цифр осталась одна буква ({@code p1}), — как есть.
+     */
     private static List<String> withoutTrailingDigits(final List<String> words) {
-        List<String> result = new ArrayList<>(words.size());
-        for (String word : words) {
-            result.add(withoutTrailingDigits(word));
+        int size = words.size();
+        while (size > 1 && isDigits(words.get(size - 1))) {
+            size--;
+        }
+        List<String> result = new ArrayList<>(size);
+        for (int i = 0; i < size; i++) {
+            result.add(withoutTrailingDigits(words.get(i)));
         }
         return result;
     }
@@ -320,8 +436,16 @@ public final class MaskingRules {
         while (end > 0 && Character.isDigit(word.charAt(end - 1))) {
             end--;
         }
-        // слово из одних цифр или слишком короткое без них (p1, a2) — как есть
-        return end >= 3 ? word.substring(0, end) : word;
+        return end >= 2 ? word.substring(0, end) : word;
+    }
+
+    private static boolean isDigits(final String word) {
+        for (int i = 0; i < word.length(); i++) {
+            if (!Character.isDigit(word.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

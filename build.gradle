@@ -7,7 +7,7 @@ plugins {
 group = 'uz.b2c.kapitalbank.commons'
 // 1.x — логи в stdout и в прежний Kafka-топик; 2.0 — только stdout, когда логи собирает Vector (ломающее изменение).
 // Пилот на одном сервисе — release candidate; после пилота 1.0.0.
-version = '1.0.0-rc1'
+version = '1.0.0-rc2'
 
 java {
     toolchain {
@@ -90,6 +90,10 @@ tasks.named('test') {
     useJUnitPlatform()
     // сквозной тест перенастраивает log4j2 глобально, поэтому идёт отдельной задачей в своей JVM
     exclude '**/e2e/**'
+    // ./gradlew test -PupdateMaskingSnapshot — перезаписать снимок словаря после осознанного изменения правил
+    if (project.hasProperty('updateMaskingSnapshot')) {
+        systemProperty 'masking.snapshot.update', file('src/test/resources/masking-dictionary-snapshot.tsv').absolutePath
+    }
 }
 
 def e2eTest = tasks.register('e2eTest', Test) {

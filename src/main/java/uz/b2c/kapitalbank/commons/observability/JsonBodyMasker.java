@@ -253,11 +253,11 @@ public final class JsonBodyMasker {
         if (rule == null && "name".equalsIgnoreCase(name) && personObject(parser.getParsingContext())) {
             rule = Rule.NAME;
         }
-        if (rule == null && !rules.pathRules().isEmpty()) {
+        // поле по пути от команды: более строгое из правил, база не ослабляет то, что команда скрыла
+        if (rule != Rule.HIDE && !rules.pathRules().isEmpty()) {
             for (MaskingRules.PathRule pathRule : rules.pathRules()) {
                 if (matchesPath(parser.getParsingContext(), pathRule.segments())) {
-                    rule = pathRule.rule();
-                    break;
+                    rule = MaskingRules.stricter(rule, pathRule.rule());
                 }
             }
         }

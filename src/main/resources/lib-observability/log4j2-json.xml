@@ -6,8 +6,11 @@
 
   Формат записи описан в layout-json.json. Тела запросов и ответов библиотека сама обрезает до
   lib.observability.http-log.max-body-bytes (не больше 64 КБ) с меткой «...[truncated]», сообщения и стеки — до 32 КБ.
-  maxStringLength (131072 символа) с запасом выше этих пределов, в том числе на рост тела при маскировании,
-  и срабатывает только как страховка.
+  maxStringLength (102400 символов) выше этих пределов с учётом роста тела при маскировании (худший случай —
+  короткие значения, заменённые на «***», около ×1,5) и срабатывает только как страховка.
+  maxStringLength — это ещё и начальный размер двух буферов log4j на каждый контекст записи, поэтому число
+  контекстов ограничено пулом recyclerFactory="queue:capacity=16": удержание не больше ~5 МБ на сервис
+  при любом числе ядер и потоков (без ограничения — до 37–78 МБ, ревью 2026-11-26).
   Уровни логгеров по-прежнему задаются через logging.level.* в application.yml.
 -->
 <Configuration status="warn" name="lib-observability-json">
@@ -17,7 +20,8 @@
 
     <Appenders>
         <Console name="stdout" target="SYSTEM_OUT">
-            <JsonTemplateLayout eventTemplateUri="classpath:lib-observability/layout-json.json" maxStringLength="131072">
+            <JsonTemplateLayout eventTemplateUri="classpath:lib-observability/layout-json.json" maxStringLength="102400"
+                                recyclerFactory="queue:capacity=16">
                 <EventTemplateAdditionalField key="service.name" value="${service.name}"/>
                 <EventTemplateAdditionalField key="service.version" value="${env:SERVICE_VERSION:-unknown}"/>
                 <EventTemplateAdditionalField key="deployment.environment" value="${env:DEPLOYMENT_ENVIRONMENT:-unknown}"/>
