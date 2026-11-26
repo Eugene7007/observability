@@ -10,7 +10,7 @@
     "$resolver": "level",
     "field": "name"
   },
-  "logger": {
+  "otel.scope.name": {
     "$resolver": "logger",
     "field": "name"
   },
@@ -41,7 +41,7 @@
     "$resolver": "mdc",
     "key": "userGuid"
   },
-  "device.id": {
+  "uz.kapitalbank.device_id": {
     "$resolver": "mdc",
     "key": "deviceId"
   },

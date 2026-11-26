@@ -11,7 +11,7 @@ implementation 'uz.b2c.kapitalbank.commons:observability-starter:<версия>'
 
 ## Что даёт библиотека
 
-**Логи.** JSON в stdout, имена полей — по OpenTelemetry semantic conventions: `service.name`, `service.version`, `deployment.environment.name`, `trace_id`, `span_id`, `user.id`, `http.*`, `url.*`, `exception.*` и др. В версиях 1.x — параллельно в прежний Kafka-топик, через ограниченную асинхронную очередь, которая не блокирует запросы.
+**Логи.** JSON в stdout, имена полей — по OpenTelemetry semantic conventions: `service.name`, `service.version`, `deployment.environment.name`, `trace_id`, `span_id`, `user.id`, `http.*`, `url.*`, `exception.*` и др. В версиях 1.x — параллельно в прежний Kafka-топик в прежнем формате, без изменений, через ограниченную асинхронную очередь, которая не блокирует запросы.
 
 **Корреляция.** `correlationId`, `clientDeviceId`, `UserGuid`, `DeviceId` из входящих заголовков попадают в MDC и передаются дальше: во все `RestTemplate` сервиса (бины, в том числе созданные через `new`, и шаблоны из `RestTemplateBuilder`) и в заголовки сообщений Kafka. Заголовки, которые сервис выставил сам, не перезаписываются. Консьюмер Kafka достаёт `correlationId` в MDC на время обработки записи и очищает после. Собственные Kafka-интерцепторы сервиса сохраняются: библиотека объединяет их со своими, а не заменяет. Имена заголовков совпадают со старой библиотекой.
 
@@ -23,7 +23,7 @@ implementation 'uz.b2c.kapitalbank.commons:observability-starter:<версия>'
 | --- | --- |
 | Actuator | Открыты `health,info,metrics,jvm,prometheus` (`MANAGEMENT_ENDPOINT_IDS`) |
 | Prometheus | `/actuator/prometheus`, общий тег `application=<spring.application.name>` |
-| Трассировка | Micrometer Tracing + Brave; `trace_id` и `span_id` в каждой строке лога; заголовки `UserGuid` и `DeviceId` передаются дальше и попадают в поля `user.id` и `device.id` |
+| Трассировка | Micrometer Tracing + Brave; `trace_id` и `span_id` в каждой строке лога; заголовки `UserGuid` и `DeviceId` передаются дальше и попадают в поля `user.id` и `uz.kapitalbank.device_id` |
 | Swagger | springdoc 2.6.0, выключен, пока не задан `ENABLE_SWAGGER=true`; пути `/swagger/<сервис>/…`, адрес `SWAGGER_BASE_URL`; обязательный заголовок `Accept-Language` у каждого метода (значения — из enum `Language` общих библиотек), теги «Контроллер_метод»; CORS `*` для API, пока Swagger включён. Свой бин `OpenAPI` сервиса главнее |
 
 Все эти значения добавляются с самым низким приоритетом, поэтому сервис переопределяет любое из них в своём `application.yml` или переменной окружения. Они действуют и при `LIB_OBSERVABILITY_ENABLED=false`.
@@ -37,7 +37,7 @@ implementation 'uz.b2c.kapitalbank.commons:observability-starter:<версия>'
 | `ON_ERROR` (по умолчанию) | Не пишутся |
 | `ALWAYS` | Пишутся — для отладки, потом вернуть обратно; `body-paths` сужает отладку до части путей |
 
-Маскирование работает при любом значении. В каждой записи есть полный размер тела (`http.request.body.size`, `http.response.body.size`), а в лог попадают первые `max-body-bytes` байт: по умолчанию 4096, сервис меняет значение у себя в пределах от 256 байт до 64 КБ. Значение вне границ заменяется ближайшим, и при старте пишется предупреждение. Обрезанное тело помечается `...[truncated]`; число, оборванное на лимите, в лог не попадает.
+Маскирование работает при любом значении. В каждой записи с телом есть его полный размер: по сети — `http.request.body.size` и `http.response.body.size` (Content-Length), прочитанный или записанный приложением — `uz.kapitalbank.http.request.body.app_size` и `uz.kapitalbank.http.response.body.app_size`, а в лог попадают первые `max-body-bytes` байт: по умолчанию 4096, сервис меняет значение у себя в пределах от 256 байт до 64 КБ. Значение вне границ заменяется ближайшим, и при старте пишется предупреждение. Обрезанное тело помечается `...[truncated]`; число, оборванное на лимите, в лог не попадает.
 
 Начало тела запроса читается до передачи запроса приложению, а приложение получает тело целиком, байт в байт. Поэтому тело есть в записи, даже если запрос отклонён до контроллера (404, 405, 415). Клиент, который объявил тело и не шлёт его, держит поток до тайм-аута соединения, как и на любом POST, читающем тело; от этого защищает ingress, буферизующий тело запроса. Начало тела читается до того, как сервис мог отклонить запрос, поэтому при `Expect: 100-continue` клиент начинает отправку тела и в случае отказа (у Tomcat это поведение по умолчанию, `continueResponseTiming=immediately`).
 
@@ -119,7 +119,7 @@ lib:
 
 Каждая запись — один JSON-объект на строку в stdout. На этот формат опираются сбор логов (Vector), хранилище, дашборды и алерты, поэтому он зафиксирован как контракт. Начиная с 1.0.0 формат меняется только добавлением полей. Переименование, удаление поля или смена его типа возможны только в новой мажорной версии и с предупреждением DevOps заранее.
 
-**Имена полей — строго по OpenTelemetry semantic conventions.** Это правило: другие команды и инструменты (Vector, Grafana, коллектор OpenTelemetry) должны понимать поля без нашего словаря. Поля данных записи — время, уровень, сообщение, логгер, `trace_id`, `span_id` — соответствуют модели записи лога OpenTelemetry (Timestamp, SeverityText, Body, InstrumentationScope, TraceId, SpanId). Для них стандарт не задаёт плоских JSON-имён, отображение настраивается в Vector или коллекторе. Остальные поля — атрибуты из реестра OpenTelemetry. Если в стандарте атрибута нет, поле получает префикс компании `uz.kapitalbank.`. OpenTelemetry предписывает для своих атрибутов не занимать пространства имён стандарта, а ставить префикс обратного домена компании. Таких полей немного, все они перечислены в таблицах ниже. Новое поле сначала ищется в [реестре атрибутов](https://opentelemetry.io/docs/specs/semconv/registry/attributes/) и только при его отсутствии заводится под `uz.kapitalbank.`.
+**Имена полей — строго по OpenTelemetry semantic conventions.** Это правило: другие команды и инструменты (Vector, Grafana, коллектор OpenTelemetry) должны понимать поля без нашего словаря. `trace_id` и `span_id` — плоские имена из стабильного документа OpenTelemetry «Trace Context in non-OTLP Log Formats», имя логгера — `otel.scope.name` (стабильный атрибут для форматов, отличных от OTLP). Для времени, уровня и сообщения (Timestamp, SeverityText, Body в модели записи OpenTelemetry) стандарт плоских JSON-имён не задаёт: остаются `@timestamp`, `level`, `message`, отображение настраивается в Vector или коллекторе. Остальные поля — атрибуты из реестра OpenTelemetry. Если в стандарте атрибута нет, поле получает префикс компании `uz.kapitalbank.`. OpenTelemetry предписывает для своих атрибутов не занимать пространства имён стандарта, а ставить префикс обратного домена компании. Таких полей немного, все они перечислены в таблицах ниже. Новое поле сначала ищется в [реестре атрибутов](https://opentelemetry.io/docs/specs/semconv/registry/attributes/) и только при его отсутствии заводится под `uz.kapitalbank.`.
 
 Контракт проверяют тесты `e2e/LogFormatContractTest` (режим STDOUT) и `e2e/LogFormatContractKafkaTest` (STDOUT_AND_KAFKA, как в 1.x на проде): stdout-запись описана в обеих конфигурациях, и проверяется каждая. Через настоящий log4j2 библиотеки пишется по записи каждого вида: обычная, с исключением, MapMessage приложения, входящий и исходящий HTTP, в том числе упавшие. Имена и типы полей сверяются с эталоном `src/test/resources/log-format-contract.json`, а значения — с правилами ниже: время в UTC, уровни, `error.type` и `server.port` по стандарту, отсутствие `null` и дубликатов ключей. Пропавшее или переименованное поле, сменившийся тип, новое поле или вид записи роняют сборку. Чтобы добавить поле, его вносят в эталон и в таблицы ниже в том же изменении.
 
@@ -131,7 +131,13 @@ lib:
 - Все текстовые значения уже замаскированы (раздел «Маскирование ПДн»).
 - Тела обрезает сама библиотека до `max-body-bytes` с меткой `...[truncated]`, сообщения и стеки — до 32 КБ. Предел строки log4j2 (102400 символов) выше, с учётом роста тела при маскировании, и срабатывает только как страховка; пул буферов log4j ограничен 16 контекстами, поэтому предел не увеличивает удержание памяти с числом потоков.
 - Поля `MapMessage`, которые пишет само приложение, выводятся с префиксом `uz.kapitalbank.data.` (`uz.kapitalbank.data.orderId`) и всегда строкой.
-- Формат для прежнего Kafka-топика (`layout-legacy-kafka.json`) временный, уходит в 2.0 и под контракт не подпадает.
+- Формат для прежнего Kafka-топика (`layout-legacy-kafka.json`) — прежний, как в rc1/rc2, и не меняется до 2.0: его читают старые потребители. Это проверяет `LegacyKafkaFormatTest`: записи всех видов сравниваются целиком с эталоном `log-format-legacy-kafka.json`, снятым с rc2.
+
+Сознательные отступления от рекомендаций OpenTelemetry, принятые банком:
+- тела запросов и ответов (`http.*.body.content`, в стандарте opt-in) пишутся у 4xx, 5xx и исключений всегда: без них не разобрать инцидент; маскирование ПДн при этом не отключается;
+- в query (`url.full`, `url.query`) скрываются значения всех параметров, а не только известных чувствительных: ПДн в запросах банка бывают в любом параметре;
+- стек в `exception.stacktrace` обрезается на входе в сервлет и до 32 КБ;
+- `telemetry.distro.*` в стандарте описывает дистрибутив OpenTelemetry; здесь — библиотеку, которой сделана запись, ближайший по смыслу атрибут.
 
 ### Поля каждой записи
 
@@ -139,7 +145,7 @@ lib:
 | --- | --- | --- | --- |
 | `@timestamp` | string | Время записи, UTC | модель записи OTel (Timestamp) |
 | `level` | string | Уровень | модель записи OTel (SeverityText) |
-| `logger` | string | Имя логгера. HTTP-записи: `observability.http.in`, `observability.http.out` | модель записи OTel (InstrumentationScope) |
+| `otel.scope.name` | string | Имя логгера. HTTP-записи: `observability.http.in`, `observability.http.out` | semconv `otel` (InstrumentationScope) |
 | `message` | string | Сообщение, замаскированное | модель записи OTel (Body) |
 | `trace_id` | string | Идентификатор трассы W3C | модель записи OTel (TraceId) |
 | `span_id` | string | Идентификатор спана | модель записи OTel (SpanId) |
@@ -150,7 +156,7 @@ lib:
 | `telemetry.distro.name` | string | `observability-starter` — какой библиотекой сделана запись | semconv `telemetry` |
 | `telemetry.distro.version` | string | Версия библиотеки | semconv `telemetry` |
 | `user.id` | string | Пользователь, из заголовка `UserGuid` | semconv `user` |
-| `device.id` | string | Устройство, из заголовка `DeviceId` | semconv `device` |
+| `uz.kapitalbank.device_id` | string | Устройство клиента, из заголовка `DeviceId` | своё: `device.id` в OTel — устройство, на котором работает сам сервис |
 | `uz.kapitalbank.correlation_id` | string | Сквозной идентификатор запроса (совместимость со старыми сервисами) | своё, в OTel нет |
 | `uz.kapitalbank.client_device_id` | string | Заголовок `clientDeviceId`; если его нет — равен `correlation_id` | своё, в OTel нет |
 
@@ -169,28 +175,35 @@ lib:
 | Поле | Тип | Где | Что содержит | Источник имени |
 | --- | --- | --- | --- | --- |
 | `http.request.method` | string | in, out | Метод | semconv `http` |
-| `url.scheme` | string | in | Схема запроса: `http` или `https` | semconv `url` |
+| `http.request.method_original` | string | in, out | Исходный метод, если он не из стандартного списка (тогда `http.request.method` = `_OTHER`) | semconv `http` |
+| `url.scheme` | string | in | Схема глазами клиента: из `X-Forwarded-Proto` / `Forwarded`, иначе из запроса | semconv `url` |
 | `url.path` | string | in | Путь без query, номер карты в пути замаскирован | semconv `url` |
+| `url.query` | string | in | Query с ключами, значения скрыты: `lang=REDACTED` | semconv `url` |
 | `http.route` | string | in | Шаблон маршрута Spring MVC, например `/api/v1/cards/{id}` | semconv `http` |
-| `url.full` | string | out | Схема, хост, порт и путь, без query и учётных данных | semconv `url` |
-| `server.address` | string | out | Хост вызываемого сервиса: по нему строятся ошибки и задержки по партнёрам | semconv `server` |
-| `server.port` | number | out | Порт; если в URL его нет — по схеме (80, 443) | semconv `server` |
+| `url.full` | string | out | Схема, хост, порт, путь и query со скрытыми значениями, без учётных данных | semconv `url` |
+| `server.address` | string | in, out | in — хост, к которому обратился клиент (`X-Forwarded-Host` или запрос); out — хост вызываемого сервиса, по нему строятся ошибки и задержки по партнёрам | semconv `server` |
+| `server.port` | number | in, out | Порт; если явно не задан — по схеме (80, 443) | semconv `server` |
+| `client.address` | string | in | Адрес клиента: первый из `X-Forwarded-For` / `Forwarded`, иначе адрес соединения | semconv `client` |
+| `network.protocol.version` | string | in | Версия HTTP: `1.1`, `2` | semconv `network` |
+| `user_agent.original` | string | in | Заголовок `User-Agent`, замаскированный; в `http.request.header.*` не дублируется | semconv `user_agent` |
 | `http.response.status_code` | number | in, out | Статус; при исключении — 500 (in) или нет поля (out) | semconv `http` |
 | `error.type` | string | in, out | Класс исключения, если обмен упал; иначе код статуса строкой: у входящих для 5xx, у исходящих для 4xx и 5xx | semconv `error` |
 | `http.request.header.<имя>` | array | in, out | Разрешённый заголовок, имя в нижнем регистре, значения массивом строк | semconv `http` |
-| `http.request.body.size` | number | in, out | Полный размер тела запроса; у входящего с пустым телом поля нет, у исходящего — 0 | semconv `http` |
+| `http.request.body.size` | number | in, out | Размер тела по сети: Content-Length входящего запроса; у исходящего — отправленные байты | semconv `http` |
 | `http.request.body.content` | string | in, out | Тело запроса, замаскированное и обрезанное до `max-body-bytes` | semconv `http` |
-| `http.response.body.size` | number | in, out | Размер тела ответа | semconv `http` |
+| `http.response.body.size` | number | in, out | Размер тела ответа по сети (Content-Length); если он не объявлен — поля нет | semconv `http` |
 | `http.response.body.content` | string | in, out | Тело ответа, замаскированное и обрезанное | semconv `http` |
+| `uz.kapitalbank.http.request.body.app_size` | number | in | Сколько байт тела прочитало приложение (после распаковки) | своё: в OTel `body.size` — байты по сети |
+| `uz.kapitalbank.http.response.body.app_size` | number | in, out | Сколько байт тела записало (in) или прочитало (out) приложение | своё: в OTel `body.size` — байты по сети |
 | `uz.kapitalbank.duration_ms` | number | in, out | Длительность обмена, мс | своё: в OTel длительность — метрика, атрибута для записи нет |
-| `uz.kapitalbank.error.code` | string | in, out | Бизнес-код ошибки из тела ответа 4xx/5xx: верхнеуровневое `code`, `errorCode`, `error_code` или `error.code` | своё, в OTel нет |
+| `uz.kapitalbank.error.code` | string | in, out | Бизнес-код ошибки из тела ответа 4xx/5xx: строка или число в верхнеуровневом `code`, `errorCode`, `error_code` или `error.code` в начале тела (первые 8 КБ). Код-строка из цифр в поле `code` скрыта маскированием (так выглядит OTP) и сюда не попадает | своё, в OTel реестр советует для доменных кодов отдельный атрибут |
 
 Поля тел есть только у 4xx, 5xx и исключений, а у успешных обменов — при `LIB_OBSERVABILITY_HTTP_LOG_BODIES=ALWAYS` и пути из `LIB_OBSERVABILITY_HTTP_LOG_BODY_PATHS`. `url.template` (шаблон пути исходящего вызова) в OpenTelemetry есть, но на Spring 6.0 (Boot 3.1) RestTemplate не передаёт шаблон интерцептору, поэтому поле не пишется: стабильно заполнить его для всех сервисов нельзя.
 
 Пример записи:
 
 ```json
-{"@timestamp":"2026-11-25T12:00:00.123Z","level":"ERROR","logger":"observability.http.out","thread.name":"http-nio-8080-exec-1","message":"HTTP out POST https://humo.internal/api/pay -> 502 in 37 ms","service.name":"p2p-service","service.version":"1.4.2","deployment.environment.name":"prod","telemetry.distro.name":"observability-starter","telemetry.distro.version":"1.0.0-rc3","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7","user.id":"5d1c…","uz.kapitalbank.correlation_id":"c0ffee00-0000-4000-8000-000000000001","http.request.method":"POST","url.full":"https://humo.internal/api/pay","server.address":"humo.internal","server.port":443,"http.response.status_code":502,"error.type":"502","uz.kapitalbank.duration_ms":37,"http.request.header.content-type":["application/json"],"http.request.body.size":14,"http.request.body.content":"{\"amount\":100}","http.response.body.size":29,"http.response.body.content":"{\"error\":{\"code\":\"DECLINED\"}}","uz.kapitalbank.error.code":"DECLINED"}
+{"@timestamp":"2026-11-25T12:00:00.123Z","level":"ERROR","otel.scope.name":"observability.http.out","thread.name":"http-nio-8080-exec-1","message":"HTTP out POST https://humo.internal/api/pay -> 502 in 37 ms","service.name":"p2p-service","service.version":"1.4.2","deployment.environment.name":"prod","telemetry.distro.name":"observability-starter","telemetry.distro.version":"1.0.0-rc4","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7","user.id":"5d1c…","uz.kapitalbank.correlation_id":"c0ffee00-0000-4000-8000-000000000001","http.request.method":"POST","url.full":"https://humo.internal/api/pay?lang=REDACTED","server.address":"humo.internal","server.port":443,"http.response.status_code":502,"error.type":"502","uz.kapitalbank.duration_ms":37,"http.request.header.content-type":["application/json"],"http.request.body.size":14,"http.request.body.content":"{\"amount\":100}","http.response.body.size":29,"http.response.body.content":"{\"error\":{\"code\":\"DECLINED\"}}","uz.kapitalbank.http.response.body.app_size":29,"uz.kapitalbank.error.code":"DECLINED"}
 ```
 
 ## Kafka
@@ -201,7 +214,7 @@ lib:
 
 Если Kafka недоступна, запросы не ждут. События копятся в очереди на 1024 штуки; при переполнении новые события в Kafka не уходят (в stdout они уже есть), и log4j пишет предупреждение. Старт с недоступной Kafka проверен, остановка занимает до 3 с.
 
-Формат записи в топике — прежний набор полей. Отличия от старой библиотеки:
+Формат записи в топике — прежний и не меняется до 2.0, когда Kafka уходит: переименования под OpenTelemetry касаются только stdout. Поля топика: `@timestamp`, `level`, `message`, `process.thread.name`, `loggerName`, `traceId`, `spanId`, `correlationId`, `clientDeviceId`, `userGuid`, `deviceId`, `thrown.extendedStackTrace`, у HTTP-записей — `http.direction`, `http.request.method`, `url.path`, `http.route`, `url.full`, `http.response.status_code`, `event.duration_ms`, `http.request.headers`, `http.*.body.bytes`, `http.*.body.content`, `error.type`, у MapMessage приложения — `data.*`. Неизменность формата проверяет `LegacyKafkaFormatTest` по эталону, снятому с rc2. Отличия от старой библиотеки:
 - стек ошибки — строка;
 - значения MDC выводятся только для известных ключей;
 - поля `http.*` вынесены в отдельные ключи.
@@ -243,6 +256,19 @@ lib:
 | `MANAGEMENT_ENDPOINT_IDS`, `ENABLE_SWAGGER`, `SWAGGER_BASE_URL` | как раньше | Те же переменные, что у старой библиотеки |
 
 ## Изменения версий
+
+**1.0.0-rc4.** Доведено соответствие OpenTelemetry по ревью 2026-11-26; формат Kafka-топика — прежний (как в rc2) и закреплён тестом. Изменения stdout относительно rc3:
+
+| rc3 | rc4 |
+| --- | --- |
+| `logger` | `otel.scope.name` |
+| `device.id` | `uz.kapitalbank.device_id` |
+| `http.request.body.size` (прочитанное приложением) | `http.request.body.size` — Content-Length; прочитанное — `uz.kapitalbank.http.request.body.app_size` |
+| `http.response.body.size` (записанное/прочитанное) | `http.response.body.size` — Content-Length, если объявлен; иначе поля нет; записанное/прочитанное — `uz.kapitalbank.http.response.body.app_size` |
+| `url.full` без query | `url.full` с query, значения скрыты: `?lang=REDACTED` |
+| `http.request.header.user-agent` у входящих | `user_agent.original` |
+
+Новые поля у входящих: `url.query`, `server.address`, `server.port`, `client.address`, `network.protocol.version`, `user_agent.original`; `url.scheme` учитывает `X-Forwarded-Proto` / `Forwarded`. У входящих и исходящих — `http.request.method_original` для нестандартных методов (`http.request.method` = `_OTHER`). Исправлено: `uz.kapitalbank.error.code` не принимает `null` и boolean и ищется только в первых 8 КБ тела; хост, который не разбирает `java.net.URI` (`my_partner:8080`), больше не превращается в `null`.
 
 **1.0.0-rc3.** Формат логов приведён к OpenTelemetry semantic conventions до выпуска 1.0.0, с которого он фиксируется как контракт. Код сервисов и настройки менять не нужно, DevOps один раз меняют разбор в Vector:
 

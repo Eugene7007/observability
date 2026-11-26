@@ -301,7 +301,7 @@ class TomcatTransparencyTest {
         TimeUnit.MILLISECONDS.sleep(300);
         String log = LOG.toString(StandardCharsets.UTF_8);
         for (Case c : cases) {
-            String line = log.lines().filter(l -> l.contains("\"logger\":\"observability.http.in\"")
+            String line = log.lines().filter(l -> l.contains("\"otel.scope.name\":\"observability.http.in\"")
                     && l.contains(c.method() + " " + c.path() + " ->"))
                 .reduce((a, b) -> b).orElse("");
             if (c.contentType().contains("json")) {

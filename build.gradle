@@ -7,7 +7,7 @@ plugins {
 group = 'uz.b2c.kapitalbank.commons'
 // 1.x — логи в stdout и в прежний Kafka-топик; 2.0 — только stdout, когда логи собирает Vector (ломающее изменение).
 // Пилот на одном сервисе — release candidate; после пилота 1.0.0.
-version = '1.0.0-rc3'
+version = '1.0.0-rc4'
 
 java {
     toolchain {
@@ -87,10 +87,12 @@ configurations.matching { it.name.startsWith('test') }.configureEach {
 }
 
 // версия библиотеки в поле telemetry.distro.version каждой записи лога
+def libraryVersion = project.version.toString()
 tasks.named('processResources') {
-    inputs.property('version', project.version)
+    // значение вычислено до замыкания: совместимо с configuration cache
+    inputs.property('version', libraryVersion)
     filesMatching('lib-observability/version.properties') {
-        expand(version: project.version)
+        expand(version: libraryVersion)
     }
 }
 

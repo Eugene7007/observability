@@ -86,7 +86,9 @@ class HttpServerLoggingFilterTest {
         HttpLogMessage message = sink.single(Level.INFO);
         assertThat(message.get("http.request.body.size")).isEqualTo(String.valueOf(body.length));
         assertThat(message.get("http.request.body.content")).isEqualTo("[application/octet-stream, 2097152 bytes]");
-        assertThat(message.get("http.response.body.size")).isEqualTo(String.valueOf(responseBody.length));
+        // Content-Length ответа не объявлен: по сети размер неизвестен, записанное приложением — своё поле
+        assertThat(message.getData()).doesNotContainKey("http.response.body.size");
+        assertThat(message.get(HttpLogFields.RESPONSE_BODY_APP_SIZE)).isEqualTo(String.valueOf(responseBody.length));
     }
 
     @Test

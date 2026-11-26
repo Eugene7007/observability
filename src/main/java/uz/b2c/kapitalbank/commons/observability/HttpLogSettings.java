@@ -27,6 +27,11 @@ public final class HttpLogSettings {
     static final String REQUEST_HEADER_PREFIX = "http.request.header.";
     private static final Set<String> ERROR_CODE_FIELDS = Set.of("code", "errorCode", "error_code");
     private static final int ERROR_CODE_MAX = 64;
+    /** Код ищется в начале тела: дальше разбор не идёт, чтобы большое тело без кода не разбиралось целиком. */
+    private static final int ERROR_CODE_SCAN_CHARS = 8192;
+    static final String REDACTED = "REDACTED";
+    private static final Set<String> KNOWN_METHODS = Set.of(
+        "GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH", "QUERY");
 
     private static final Set<String> SECRET_HEADERS = Set.of(
         "authorization", "proxy-authorization", "cookie", "set-cookie", "x-auth-token", "userpinfl", "userphone");
@@ -208,8 +213,21 @@ public final class HttpLogSettings {
     }
 
     /**
-     * Заголовки из allowlist в виде {@code name=value; name=value}. Остальные не попадают в лог совсем.
+     * Прежний формат заголовков для Kafka-топика (rc1/rc2): {@code Имя=значение; Имя=значение}, первое значение.
      */
+    <T> String renderHeaders(final Iterable<String> names, final Function<String, T> valueOf) {
+        StringBuilder result = new StringBuilder();
+        for (String name : names) {
+            if (name != null && allowedHeaders.contains(name.toLowerCase(Locale.ROOT)) && !isSecretHeader(name)) {
+                if (!result.isEmpty()) {
+                    result.append("; ");
+                }
+                result.append(name).append('=').append(LogTextMasker.maskOrPlaceholder(String.valueOf(valueOf.apply(name))));
+            }
+        }
+        return result.isEmpty() ? null : result.toString();
+    }
+
     /**
      * Разрешённые заголовки запроса — по полю на заголовок, как в OpenTelemetry: {@code http.request.header.<имя>},
      * имя в нижнем регистре, значение — массив строк (у заголовка бывает несколько значений). Значения маскируются.
@@ -250,13 +268,16 @@ public final class HttpLogSettings {
             while (found == null && parser.nextToken() == com.fasterxml.jackson.core.JsonToken.FIELD_NAME) {
                 String name = parser.currentName();
                 com.fasterxml.jackson.core.JsonToken value = parser.nextToken();
-                if (ERROR_CODE_FIELDS.contains(name) && value.isScalarValue()) {
+                if (parser.currentLocation().getCharOffset() > ERROR_CODE_SCAN_CHARS) {
+                    break;
+                }
+                if (ERROR_CODE_FIELDS.contains(name) && isCodeToken(value)) {
                     found = codeValue(parser.getText());
                 } else if ("error".equals(name) && value == com.fasterxml.jackson.core.JsonToken.START_OBJECT) {
                     while (found == null && parser.nextToken() == com.fasterxml.jackson.core.JsonToken.FIELD_NAME) {
                         String inner = parser.currentName();
                         com.fasterxml.jackson.core.JsonToken innerValue = parser.nextToken();
-                        if ("code".equals(inner) && innerValue.isScalarValue()) {
+                        if ("code".equals(inner) && isCodeToken(innerValue)) {
                             found = codeValue(parser.getText());
                         } else {
                             parser.skipChildren();
@@ -271,6 +292,64 @@ public final class HttpLogSettings {
             // тело обрезано или не JSON — кода нет
             return null;
         }
+    }
+
+    /** Код — строка или число; null и boolean кодом не считаются. */
+    private static boolean isCodeToken(final com.fasterxml.jackson.core.JsonToken token) {
+        return token == com.fasterxml.jackson.core.JsonToken.VALUE_STRING
+            || token == com.fasterxml.jackson.core.JsonToken.VALUE_NUMBER_INT;
+    }
+
+    /**
+     * Метод по OpenTelemetry: известный — как есть, любой другой — {@code _OTHER}, а исходный пишется в
+     * {@code http.request.method_original}.
+     */
+    static String otelMethod(final String method) {
+        return method != null && KNOWN_METHODS.contains(method) ? method : "_OTHER";
+    }
+
+    static boolean knownMethod(final String method) {
+        return method != null && KNOWN_METHODS.contains(method);
+    }
+
+    /**
+     * Query с сохранёнными ключами и скрытыми значениями: {@code lang=REDACTED&cardId=REDACTED}. OpenTelemetry велит
+     * скрывать значения чувствительных параметров с сохранением ключа; в запросах банка ПДн бывают в любом параметре,
+     * поэтому скрываются все значения. Ключ проходит маскер текста лога.
+     */
+    static String redactQuery(final String rawQuery) {
+        if (rawQuery == null || rawQuery.isEmpty()) {
+            return null;
+        }
+        StringBuilder result = new StringBuilder(rawQuery.length());
+        for (String pair : rawQuery.split("&")) {
+            if (pair.isEmpty()) {
+                continue;
+            }
+            if (!result.isEmpty()) {
+                result.append('&');
+            }
+            int eq = pair.indexOf('=');
+            String key = eq < 0 ? pair : pair.substring(0, eq);
+            result.append(LogTextMasker.mask(key));
+            if (eq >= 0) {
+                result.append('=').append(REDACTED);
+            }
+        }
+        return result.isEmpty() ? null : result.toString();
+    }
+
+    /** {@code HTTP/1.1} → {@code 1.1}, {@code HTTP/2.0} → {@code 2}, как в примерах OpenTelemetry. */
+    static String protocolVersion(final String protocol) {
+        if (protocol == null) {
+            return null;
+        }
+        int slash = protocol.indexOf('/');
+        String version = slash < 0 ? protocol : protocol.substring(slash + 1);
+        if (version.endsWith(".0") && !version.startsWith("1")) {
+            version = version.substring(0, version.length() - 2);
+        }
+        return version.isEmpty() ? null : version;
     }
 
     private static String codeValue(final String text) {
