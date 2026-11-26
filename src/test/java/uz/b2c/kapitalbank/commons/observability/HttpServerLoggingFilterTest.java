@@ -59,10 +59,10 @@ class HttpServerLoggingFilterTest {
             .startsWith("HTTP in POST /internal/v1/uzcard/cards/registration -> 200 in ");
         assertThat(message.get("http.request.body.content")).isEqualTo("{\"pan\":\"860051******8413\",\"expiry\":\"***\"}");
         assertThat(message.get("http.response.body.content")).contains("\"id\":7");
-        assertThat(message.get("http.request.headers"))
-            .contains("correlationId=c-1")
-            .doesNotContainIgnoringCase("authorization")
-            .doesNotContain("31234567890123");
+        // заголовки по OpenTelemetry: поле на заголовок, значение — массив
+        assertThat(message.get("http.request.header.correlationid")).isEqualTo("[c-1]");
+        assertThat(message.getData().keySet()).noneMatch(key -> key.contains("authorization"));
+        assertThat(message.getData().toString()).doesNotContain("31234567890123");
     }
 
     @Test
@@ -84,9 +84,9 @@ class HttpServerLoggingFilterTest {
 
         assertThat(response.getContentAsByteArray()).hasSize(responseBody.length);
         HttpLogMessage message = sink.single(Level.INFO);
-        assertThat(message.get("http.request.body.bytes")).isEqualTo(String.valueOf(body.length));
+        assertThat(message.get("http.request.body.size")).isEqualTo(String.valueOf(body.length));
         assertThat(message.get("http.request.body.content")).isEqualTo("[application/octet-stream, 2097152 bytes]");
-        assertThat(message.get("http.response.body.bytes")).isEqualTo(String.valueOf(responseBody.length));
+        assertThat(message.get("http.response.body.size")).isEqualTo(String.valueOf(responseBody.length));
     }
 
     @Test

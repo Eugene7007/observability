@@ -28,8 +28,8 @@ class MaskedLayoutTest {
 
         assertThat(out).doesNotContain(PAN).doesNotContain("998901234567").doesNotContain("secret-value")
             .contains("\"message\":\"client card 860012******1233 phone=***4567\"")
-            .contains("\"error.type\":\"java.lang.IllegalStateException\"")
-            .contains("\"error.message\":\"400 Bad Request: {\\\"pan\\\":\\\"860012******1233\\\"}\"")
+            .contains("\"exception.type\":\"java.lang.IllegalStateException\"")
+            .contains("\"exception.message\":\"400 Bad Request: {\\\"pan\\\":\\\"860012******1233\\\"}\"")
             .contains("Caused by: java.lang.RuntimeException: cause with token=***");
         // вне Spring-контекста log4j пишет в консоль предупреждения о lookup spring:, их пропускаем
         long jsonLines = out.lines().filter(line -> line.startsWith("{")).peek(line ->
@@ -44,7 +44,7 @@ class MaskedLayoutTest {
                 .with("cardNumber", "8600 1234 5678 1233").with("phone", "998901234567").with("message", "m")));
 
         assertThat(out).doesNotContain("1234 5678").doesNotContain("998901234567")
-            .contains("\"data.phone\":\"***4567\"").contains("\"data.message\":\"m\"");
+            .contains("\"uz.kapitalbank.data.phone\":\"***4567\"").contains("\"uz.kapitalbank.data.message\":\"m\"");
     }
 
     @Test

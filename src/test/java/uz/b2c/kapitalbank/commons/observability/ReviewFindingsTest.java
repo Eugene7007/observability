@@ -16,6 +16,7 @@ import uz.b2c.kapitalbank.commons.observability.kafka.KafkaCorrelationIntercepto
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -115,10 +116,12 @@ class ReviewFindingsTest {
         properties.setAllowedHeaders(Set.of("authorization", "cookie", "userpinfl", "x-request-id"));
         HttpLogSettings settings = new HttpLogSettings(properties);
 
-        String rendered = settings.renderHeaders(List.of("Authorization", "Cookie", "UserPinfl", "x-request-id"),
-            name -> "x-request-id".equals(name) ? "r-1" : "secret");
+        HttpLogMessage message = new HttpLogMessage("test");
+        settings.addRequestHeaders(message, List.of("Authorization", "Cookie", "UserPinfl", "X-Request-ID"),
+            name -> List.of("X-Request-ID".equals(name) ? "r-1" : "secret"));
 
-        assertThat(rendered).isEqualTo("x-request-id=r-1");
+        // поле на заголовок по OpenTelemetry: http.request.header.<имя в нижнем регистре>, значение — массив
+        assertThat(message.getData()).containsOnly(Map.entry("http.request.header.x-request-id", List.of("r-1")));
     }
 
     // ---------- важно 7 и 9: async и context-path ----------

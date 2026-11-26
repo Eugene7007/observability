@@ -7,7 +7,7 @@ plugins {
 group = 'uz.b2c.kapitalbank.commons'
 // 1.x — логи в stdout и в прежний Kafka-топик; 2.0 — только stdout, когда логи собирает Vector (ломающее изменение).
 // Пилот на одном сервисе — release candidate; после пилота 1.0.0.
-version = '1.0.0-rc2'
+version = '1.0.0-rc3'
 
 java {
     toolchain {
@@ -84,6 +84,14 @@ dependencies {
 // logback из стартеров в тестах не нужен: библиотека работает на log4j2, как и сервисы
 configurations.matching { it.name.startsWith('test') }.configureEach {
     exclude group: 'org.springframework.boot', module: 'spring-boot-starter-logging'
+}
+
+// версия библиотеки в поле telemetry.distro.version каждой записи лога
+tasks.named('processResources') {
+    inputs.property('version', project.version)
+    filesMatching('lib-observability/version.properties') {
+        expand(version: project.version)
+    }
 }
 
 tasks.named('test') {

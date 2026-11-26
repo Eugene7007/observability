@@ -1,77 +1,84 @@
 {
-  "_comment": "Контракт формата логов lib-observability (JSON в stdout). Внутри 1.x — только добавление полей. 'data.*' — поля MapMessage приложения. Описание полей — README, раздел «Формат логов». Тесты: e2e/LogFormatContractTest и LogFormatContractKafkaTest.",
+  "_comment": "Контракт формата логов lib-observability (JSON в stdout). Имена полей — OpenTelemetry semantic conventions; собственные поля библиотеки, которых нет в стандарте, — под префиксом uz.kapitalbank. Внутри 1.x — только добавление полей. 'uz.kapitalbank.data.*' — поля MapMessage приложения, 'http.request.header.*' — разрешённые заголовки (массив строк). Описание полей — README, раздел «Формат логов». Тесты: e2e/LogFormatContractTest и LogFormatContractKafkaTest.",
   "common": {
     "@timestamp": "string",
     "level": "string",
     "logger": "string",
-    "thread": "string",
+    "thread.name": "string",
     "message": "string",
     "service.name": "string",
     "service.version": "string",
-    "deployment.environment": "string",
+    "deployment.environment.name": "string",
+    "telemetry.distro.name": "string",
+    "telemetry.distro.version": "string",
     "trace_id": "string",
     "span_id": "string",
-    "correlation_id": "string",
-    "client_device_id": "string",
-    "user_guid": "string",
-    "device_id": "string"
+    "user.id": "string",
+    "device.id": "string",
+    "uz.kapitalbank.correlation_id": "string",
+    "uz.kapitalbank.client_device_id": "string"
   },
   "records": {
     "log": {},
     "error": {
-      "error.type": "string",
-      "error.message": "string",
-      "error.stack_trace": "string"
+      "exception.type": "string",
+      "exception.message": "string",
+      "exception.stacktrace": "string"
     },
     "map": {
-      "data.*": "string"
+      "uz.kapitalbank.data.*": "string"
     },
     "http.in": {
-      "http.direction": "string",
       "http.request.method": "string",
-      "http.route": "string",
+      "url.scheme": "string",
       "url.path": "string",
-      "http.request.headers": "string",
-      "http.request.body.bytes": "number",
+      "http.route": "string",
+      "http.request.header.*": "array",
+      "http.request.body.size": "number",
       "http.request.body.content": "string",
       "http.response.status_code": "number",
-      "http.response.body.bytes": "number",
+      "http.response.body.size": "number",
       "http.response.body.content": "string",
-      "event.duration_ms": "number"
+      "uz.kapitalbank.duration_ms": "number",
+      "uz.kapitalbank.error.code": "string"
     },
     "http.in.failed": {
-      "http.direction": "string",
       "http.request.method": "string",
-      "http.route": "string",
+      "url.scheme": "string",
       "url.path": "string",
-      "http.request.headers": "string",
-      "http.request.body.bytes": "number",
+      "http.route": "string",
+      "http.request.header.*": "array",
+      "http.request.body.size": "number",
       "http.request.body.content": "string",
       "http.response.status_code": "number",
-      "http.response.body.bytes": "number",
-      "event.duration_ms": "number",
+      "http.response.body.size": "number",
+      "uz.kapitalbank.duration_ms": "number",
       "error.type": "string"
     },
     "http.out": {
-      "http.direction": "string",
       "http.request.method": "string",
       "url.full": "string",
-      "http.request.headers": "string",
-      "http.request.body.bytes": "number",
+      "server.address": "string",
+      "server.port": "number",
+      "http.request.header.*": "array",
+      "http.request.body.size": "number",
       "http.request.body.content": "string",
       "http.response.status_code": "number",
-      "http.response.body.bytes": "number",
+      "http.response.body.size": "number",
       "http.response.body.content": "string",
-      "event.duration_ms": "number"
+      "uz.kapitalbank.duration_ms": "number",
+      "error.type": "string",
+      "uz.kapitalbank.error.code": "string"
     },
     "http.out.failed": {
-      "http.direction": "string",
       "http.request.method": "string",
       "url.full": "string",
-      "http.request.headers": "string",
-      "http.request.body.bytes": "number",
+      "server.address": "string",
+      "server.port": "number",
+      "http.request.header.*": "array",
+      "http.request.body.size": "number",
       "http.request.body.content": "string",
-      "event.duration_ms": "number",
+      "uz.kapitalbank.duration_ms": "number",
       "error.type": "string"
     }
   }

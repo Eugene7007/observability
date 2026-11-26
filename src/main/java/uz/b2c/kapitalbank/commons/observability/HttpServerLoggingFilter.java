@@ -295,16 +295,19 @@ public class HttpServerLoggingFilter extends OncePerRequestFilter {
         Object route = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
         String summary = "HTTP in " + request.getMethod() + " " + path + " -> " + outcome + " in " + durationMs + " ms";
 
+        // имена полей — OpenTelemetry semantic conventions (HTTP server); свои поля — под префиксом uz.kapitalbank.
         HttpLogMessage message = new HttpLogMessage(summary)
-            .field("http.direction", "in")
             .field("http.request.method", request.getMethod())
+            .field("url.scheme", request.getScheme())
             .field("url.path", path)
             .field("http.route", route)
             .field("http.response.status_code", status)
-            .field("event.duration_ms", durationMs)
-            .field("http.request.headers", settings.renderHeaders(
-                Collections.list(request.getHeaderNames()), request::getHeader))
-            .field("error.type", failure == null ? null : failure.getClass().getName());
+            .field(HttpLogFields.DURATION_MS, durationMs)
+            // error.type по OpenTelemetry: класс исключения, а без него у 5xx — код статуса строкой
+            .field("error.type", failure != null ? failure.getClass().getName()
+                : status >= SERVER_ERROR ? String.valueOf(status) : null);
+        settings.addRequestHeaders(message, Collections.list(request.getHeaderNames()),
+            name -> Collections.list(request.getHeaders(name)));
 
         boolean includeBodies = settings.includeBodies(status, failure != null, pathWithinApplication(request));
         if (includeBodies) {
@@ -320,13 +323,14 @@ public class HttpServerLoggingFilter extends OncePerRequestFilter {
             } else {
                 content = settings.renderBody(capturedRequest.capture(), request.getContentType());
             }
-            message.field("http.request.body.bytes", bytes > 0 ? bytes : null)
+            message.field("http.request.body.size", bytes > 0 ? bytes : null)
                 .field("http.request.body.content", content);
         }
         if (includeBodies) {
-            message.field("http.response.body.bytes", capturedResponse.capture().total())
-                .field("http.response.body.content",
-                    settings.renderBody(capturedResponse.capture(), response.getContentType()));
+            String responseBody = settings.renderBody(capturedResponse.capture(), response.getContentType());
+            message.field("http.response.body.size", capturedResponse.capture().total())
+                .field("http.response.body.content", responseBody)
+                .field(HttpLogFields.ERROR_CODE, status >= CLIENT_ERROR ? HttpLogSettings.errorCode(responseBody) : null);
         }
         return message;
     }

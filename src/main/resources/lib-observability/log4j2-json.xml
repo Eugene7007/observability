@@ -4,7 +4,8 @@
   делает агент в кластере (Vector). Приложение ничего не знает о Kafka и Loki, поэтому их отказ
   не влияет на обработку запросов.
 
-  Формат записи описан в layout-json.json. Тела запросов и ответов библиотека сама обрезает до
+  Формат записи описан в layout-json.json: имена полей — OpenTelemetry semantic conventions, собственные поля
+  библиотеки — под префиксом uz.kapitalbank. (README, «Формат логов»). Тела запросов и ответов библиотека сама обрезает до
   lib.observability.http-log.max-body-bytes (не больше 64 КБ) с меткой «...[truncated]», сообщения и стеки — до 32 КБ.
   maxStringLength (102400 символов) выше этих пределов с учётом роста тела при маскировании (худший случай —
   короткие значения, заменённые на «***», около ×1,5) и срабатывает только как страховка.
@@ -24,7 +25,9 @@
                                 recyclerFactory="queue:capacity=16">
                 <EventTemplateAdditionalField key="service.name" value="${service.name}"/>
                 <EventTemplateAdditionalField key="service.version" value="${env:SERVICE_VERSION:-unknown}"/>
-                <EventTemplateAdditionalField key="deployment.environment" value="${env:DEPLOYMENT_ENVIRONMENT:-unknown}"/>
+                <EventTemplateAdditionalField key="deployment.environment.name" value="${env:DEPLOYMENT_ENVIRONMENT:-unknown}"/>
+                <EventTemplateAdditionalField key="telemetry.distro.name" value="${libobservability:name}"/>
+                <EventTemplateAdditionalField key="telemetry.distro.version" value="${libobservability:version}"/>
             </JsonTemplateLayout>
         </Console>
     </Appenders>

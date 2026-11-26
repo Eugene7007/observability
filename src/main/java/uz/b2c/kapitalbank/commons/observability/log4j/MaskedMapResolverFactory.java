@@ -12,6 +12,7 @@ import org.apache.logging.log4j.layout.template.json.util.JsonWriter;
 import org.apache.logging.log4j.message.MapMessage;
 import org.apache.logging.log4j.message.Message;
 import org.apache.logging.log4j.util.IndexedReadOnlyStringMap;
+import uz.b2c.kapitalbank.commons.observability.HttpLogFields;
 import uz.b2c.kapitalbank.commons.observability.HttpLogMessage;
 import uz.b2c.kapitalbank.commons.observability.LogTextMasker;
 import uz.b2c.kapitalbank.commons.observability.MaskingRules;
@@ -20,7 +21,8 @@ import uz.b2c.kapitalbank.commons.observability.MaskingRules;
  * Резолвер {@code "$resolver": "maskedMap"}: поля {@link MapMessage} как отдельные поля записи.
  * Поля записей HTTP-логирования ({@link HttpLogMessage}) пишутся как есть — они уже замаскированы при захвате.
  * Поля любого другого MapMessage (например, {@code log.info(new MapMessage<>().with("phone", …))}) маскируются
- * по имени поля и по тексту значения и получают префикс {@code prefix} (по умолчанию {@code data.}),
+ * по имени поля и по тексту значения и получают префикс {@code prefix} (по умолчанию {@code uz.kapitalbank.data.}:
+ * в OpenTelemetry нет атрибутов для произвольных полей приложения, поэтому они идут под префиксом компании),
  * чтобы не перезаписать основные поля записи вроде {@code message}.
  */
 @Plugin(name = "MaskedMapResolverFactory", category = TemplateResolverFactory.CATEGORY)
@@ -43,7 +45,7 @@ public final class MaskedMapResolverFactory implements EventResolverFactory {
 
     @Override
     public EventResolver create(final EventResolverContext context, final TemplateResolverConfig config) {
-        String prefix = config.exists("prefix") ? config.getString("prefix") : "data.";
+        String prefix = config.exists("prefix") ? config.getString("prefix") : HttpLogFields.DATA_PREFIX;
         return new Resolver(prefix);
     }
 

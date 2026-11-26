@@ -176,8 +176,8 @@ abstract class LogFormatContract {
                 problems.add("«" + message + "»: поле " + field.getKey() + " = null (поле без значения не пишется)");
             }
         });
-        if ("contract-npe".equals(message) && record.has("error.message")) {
-            problems.add("contract-npe: у исключения без сообщения есть error.message");
+        if ("contract-npe".equals(message) && record.has("exception.message")) {
+            problems.add("contract-npe: у исключения без сообщения есть exception.message");
         }
         if (message.contains("contract-large")) {
             String content = record.path("http.request.body.content").asText();
@@ -200,6 +200,20 @@ abstract class LogFormatContract {
             if (written.isBefore(started.minusSeconds(60)) || written.isAfter(java.time.Instant.now().plusSeconds(60))) {
                 problems.add(kind + ": @timestamp " + timestamp + " не UTC (расходится с текущим временем UTC)");
             }
+        }
+        // значения OpenTelemetry: error.type у HTTP без исключения — код статуса строкой, порт — по схеме
+        if ("http.out".equals(kind) && !"502".equals(record.path("error.type").asText())) {
+            problems.add(kind + ": error.type «" + record.path("error.type").asText() + "» вместо кода статуса «502»");
+        }
+        if (kind.startsWith("http.out") && record.path("server.port").asInt() != 80) {
+            problems.add(kind + ": server.port " + record.path("server.port") + " вместо 80 по умолчанию для http");
+        }
+        if ("http.in".equals(kind) && !"LIMIT".equals(record.path("uz.kapitalbank.error.code").asText())) {
+            problems.add(kind + ": uz.kapitalbank.error.code «" + record.path("uz.kapitalbank.error.code").asText()
+                + "» вместо LIMIT из тела ответа");
+        }
+        if (record.path("telemetry.distro.name").asText().isBlank()) {
+            problems.add(kind + ": пустое telemetry.distro.name");
         }
         String level = record.path("level").asText();
         if (!LEVELS.contains(level)) {
@@ -310,7 +324,7 @@ abstract class LogFormatContract {
         } else if ("contract-map".equals(logger)) {
             kind = "map";
         } else if (message.startsWith("contract-")) {
-            kind = record.has("error.type") ? "error" : "log";
+            kind = record.has("exception.type") ? "error" : "log";
         }
         return kind;
     }

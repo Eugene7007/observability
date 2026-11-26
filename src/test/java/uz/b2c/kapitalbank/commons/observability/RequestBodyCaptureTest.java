@@ -65,7 +65,7 @@ class RequestBodyCaptureTest {
 
         assertThat(Arrays.equals(seen.get(), body.getBytes(StandardCharsets.US_ASCII))).isTrue();
         HttpLogMessage message = sink.single(Level.WARN);
-        assertThat(message.get("http.request.body.bytes")).isEqualTo(String.valueOf(body.length()));
+        assertThat(message.get("http.request.body.size")).isEqualTo(String.valueOf(body.length()));
         assertThat(message.get("http.request.body.content")).endsWith(LogTextMasker.TRUNCATED_MARK);
     }
 
@@ -96,7 +96,7 @@ class RequestBodyCaptureTest {
 
             HttpLogMessage message = local.single(status >= 500 ? Level.ERROR : Level.WARN);
             assertThat(message.get("http.request.body.content")).as("status %d", status).isEqualTo(MASKED);
-            assertThat(message.get("http.request.body.bytes")).isEqualTo(String.valueOf(BODY.length()));
+            assertThat(message.get("http.request.body.size")).isEqualTo(String.valueOf(BODY.length()));
         }
     }
 

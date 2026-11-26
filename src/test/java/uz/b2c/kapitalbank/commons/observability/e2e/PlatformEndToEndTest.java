@@ -70,7 +70,7 @@ class PlatformEndToEndTest {
         assertThat(tracerType).contains("BraveTracer");
         Matcher line = Pattern.compile("\\{[^\\n]*\"message\":\"inside traced work\"[^\\n]*}").matcher(out);
         assertThat(line.find()).as(out).isTrue();
-        assertThat(line.group()).containsPattern("\"trace_id\":\"[0-9a-f]{16,32}\"").contains("\"user_guid\":\"u-42\"");
+        assertThat(line.group()).containsPattern("\"trace_id\":\"[0-9a-f]{16,32}\"").contains("\"user.id\":\"u-42\"");
         // без адреса Kafka логи идут только в stdout
         assertThat(out).contains("адрес Kafka не задан");
     }

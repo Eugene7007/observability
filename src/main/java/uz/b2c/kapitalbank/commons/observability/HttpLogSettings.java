@@ -7,6 +7,7 @@ import org.springframework.util.AntPathMatcher;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Map;
 
 import java.util.List;
@@ -23,6 +24,9 @@ public final class HttpLogSettings {
 
     private static final int CLIENT_ERROR = 400;
     private static final JsonFactory JSON = new JsonFactory();
+    static final String REQUEST_HEADER_PREFIX = "http.request.header.";
+    private static final Set<String> ERROR_CODE_FIELDS = Set.of("code", "errorCode", "error_code");
+    private static final int ERROR_CODE_MAX = 64;
 
     private static final Set<String> SECRET_HEADERS = Set.of(
         "authorization", "proxy-authorization", "cookie", "set-cookie", "x-auth-token", "userpinfl", "userphone");
@@ -206,17 +210,74 @@ public final class HttpLogSettings {
     /**
      * Заголовки из allowlist в виде {@code name=value; name=value}. Остальные не попадают в лог совсем.
      */
-    <T> String renderHeaders(final Iterable<String> names, final Function<String, T> valueOf) {
-        StringBuilder result = new StringBuilder();
+    /**
+     * Разрешённые заголовки запроса — по полю на заголовок, как в OpenTelemetry: {@code http.request.header.<имя>},
+     * имя в нижнем регистре, значение — массив строк (у заголовка бывает несколько значений). Значения маскируются.
+     */
+    void addRequestHeaders(final HttpLogMessage message, final Iterable<String> names,
+                           final Function<String, ? extends Iterable<String>> valuesOf) {
         for (String name : names) {
-            if (name != null && allowedHeaders.contains(name.toLowerCase(Locale.ROOT)) && !isSecretHeader(name)) {
-                if (!result.isEmpty()) {
-                    result.append("; ");
+            if (name == null) {
+                continue;
+            }
+            String lower = name.toLowerCase(Locale.ROOT);
+            if (allowedHeaders.contains(lower) && !isSecretHeader(name)) {
+                List<String> values = new ArrayList<>(1);
+                Iterable<String> raw = valuesOf.apply(name);
+                if (raw != null) {
+                    for (String value : raw) {
+                        values.add(LogTextMasker.maskOrPlaceholder(String.valueOf(value)));
+                    }
                 }
-                result.append(name).append('=').append(LogTextMasker.maskOrPlaceholder(String.valueOf(valueOf.apply(name))));
+                if (!values.isEmpty()) {
+                    message.field(REQUEST_HEADER_PREFIX + lower, List.copyOf(values));
+                }
             }
         }
-        return result.isEmpty() ? null : result.toString();
+    }
+
+    /**
+     * Бизнес-код ошибки из уже замаскированного JSON-тела ответа: верхнеуровневое {@code code}, {@code errorCode},
+     * {@code error_code} или {@code error.code}. Скрытое маскированием значение и длинный текст кодом не считаются.
+     */
+    static String errorCode(final String maskedJson) {
+        if (maskedJson == null || maskedJson.isEmpty() || maskedJson.charAt(0) != '{') {
+            return null;
+        }
+        try (com.fasterxml.jackson.core.JsonParser parser = JSON.createParser(maskedJson)) {
+            parser.nextToken();
+            String found = null;
+            while (found == null && parser.nextToken() == com.fasterxml.jackson.core.JsonToken.FIELD_NAME) {
+                String name = parser.currentName();
+                com.fasterxml.jackson.core.JsonToken value = parser.nextToken();
+                if (ERROR_CODE_FIELDS.contains(name) && value.isScalarValue()) {
+                    found = codeValue(parser.getText());
+                } else if ("error".equals(name) && value == com.fasterxml.jackson.core.JsonToken.START_OBJECT) {
+                    while (found == null && parser.nextToken() == com.fasterxml.jackson.core.JsonToken.FIELD_NAME) {
+                        String inner = parser.currentName();
+                        com.fasterxml.jackson.core.JsonToken innerValue = parser.nextToken();
+                        if ("code".equals(inner) && innerValue.isScalarValue()) {
+                            found = codeValue(parser.getText());
+                        } else {
+                            parser.skipChildren();
+                        }
+                    }
+                } else {
+                    parser.skipChildren();
+                }
+            }
+            return found;
+        } catch (IOException | RuntimeException e) {
+            // тело обрезано или не JSON — кода нет
+            return null;
+        }
+    }
+
+    private static String codeValue(final String text) {
+        if (text == null || text.isBlank() || text.length() > ERROR_CODE_MAX || text.contains("*")) {
+            return null;
+        }
+        return text;
     }
 
     /**
